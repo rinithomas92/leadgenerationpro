@@ -19,6 +19,7 @@ export type SourceQuery = {
   categories: string[];
   include?: string[];
   exclude?: string[];
+  keywords?: "widen" | "narrow";
   area: Area;
   excludeAreas?: Area[];
 };

@@ -164,7 +164,7 @@ export function ProjectDetails(props: Props) {
                 <p key={s.id}>
                   <b>{s.label}</b>
                   <span className="muted"> · {s.categories.map(categoryLabel).join(", ")}</span>
-                  {s.include.length > 0 && <span className="muted"> · only “{s.include.join("”, “")}”</span>}
+                  {s.include.length > 0 && <span className="muted"> · also names with “{s.include.join("”, “")}”</span>}
                   {s.exclude.length > 0 && <span className="muted"> · not “{s.exclude.join("”, “")}”</span>}
                 </p>
               ))}

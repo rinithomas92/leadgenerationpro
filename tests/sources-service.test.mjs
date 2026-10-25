@@ -69,8 +69,11 @@ test("counts split total, closed, no-channel and reachable places", async () => 
   assert.deepEqual(r, { total: 4, closed: 1, noChannel: 1, reachable: 2, release: "2026-10-21.0" });
   const ex = await (await post("/count", { ...arch, area: baner, exclude: ["wholesale"] })).json();
   assert.equal(ex.reachable, 1);
-  const inc = await (await post("/count", { ...arch, area: baner, include: ["verb"] })).json();
+  const inc = await (await post("/count", { ...arch, area: baner, include: ["verb"], keywords: "narrow" })).json();
   assert.equal(inc.total, 1);
+  // By default keywords widen: category matches plus any place with the word in its name.
+  const wide = await (await post("/count", { ...arch, area: baner, include: ["verb"] })).json();
+  assert.ok(wide.total >= 4);
 });
 
 test("wider tiers exclude nearer ones, so each place is in exactly one tier", async () => {

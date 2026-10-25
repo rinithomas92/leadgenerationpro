@@ -181,7 +181,7 @@ function SegmentEditor({ segment, onChange, onRemove, related }: { segment: Segm
       )}
       <CategoryBrowser selected={segment.categories} onAdd={(ids) => onChange({ ...segment, categories: [...new Set([...segment.categories, ...ids])] })} />
       <div className="form-grid">
-        <Field label="Include keywords (optional)" hint="Only names containing one of these, comma-separated.">
+        <Field label="Also include names containing (optional)" hint="Also finds places whose names contain one of these, comma-separated, even in other categories.">
           <input value={inc} onChange={(e) => setInc(e.target.value)} onBlur={() => { if (inc.trim()) { onChange({ ...segment, include: [...new Set([...segment.include, ...words(inc)])] }); setInc(""); } }} placeholder="e.g. design, interiors" />
         </Field>
         <Field label="Exclude keywords (optional)" hint="Skip names containing any of these.">

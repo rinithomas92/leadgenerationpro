@@ -26,8 +26,11 @@ export type Area = z.infer<typeof areaSchema>;
 const keyword = z.string().trim().min(1).max(80);
 export const querySchema = z.object({
   country: z.string().regex(/^[A-Z]{2}$/),
-  categories: z.array(z.string().regex(/^[a-z0-9_]{1,80}$/)).min(1).max(60),
+  categories: z.array(z.string().regex(/^[a-z0-9_]{1,80}$/)).min(1).max(400),
   include: z.array(keyword).max(30).default([]),
+  // "widen" (default): a place matches by category OR by an include keyword in its name.
+  // "narrow": it must match a category AND a keyword.
+  keywords: z.enum(["widen", "narrow"]).default("widen"),
   exclude: z.array(keyword).max(30).default([]),
   area: areaSchema,
   // Nearer tiers, subtracted so every place belongs to exactly one tier.
@@ -125,13 +128,15 @@ export function whereSql(q: Query) {
     return `$${k}`;
   };
   const cats = param(listValue(q.categories));
+  const byCategory = `(taxonomy.primary IN (SELECT unnest(${cats})) OR list_has_any(coalesce(taxonomy.alternates, []), ${cats}) OR basic_category IN (SELECT unnest(${cats})))`;
+  const byName = q.include.length ? `regexp_matches(lower(names.primary), ${param(q.include.map(escapeRe).join("|"))})` : "";
   const parts = [
     `addresses[1].country = ${param(q.country)}`,
-    `(taxonomy.primary IN (SELECT unnest(${cats})) OR list_has_any(coalesce(taxonomy.alternates, []), ${cats}) OR basic_category IN (SELECT unnest(${cats})))`,
+    byName && q.keywords === "widen" ? `(${byCategory} OR ${byName})` : byCategory,
     areaSql(q.area, param, q.country),
     ...q.excludeAreas.map((a) => `NOT ${areaSql(a, param, q.country)}`),
   ];
-  if (q.include.length) parts.push(`regexp_matches(lower(names.primary), ${param(q.include.map(escapeRe).join("|"))})`);
+  if (byName && q.keywords === "narrow") parts.push(byName);
   if (q.exclude.length) parts.push(`NOT regexp_matches(lower(coalesce(names.primary, '')), ${param(q.exclude.map(escapeRe).join("|"))})`);
   parts.push("names.primary IS NOT NULL");
   return { where: parts.join("\n  AND "), params, param };

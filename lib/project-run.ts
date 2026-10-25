@@ -8,6 +8,7 @@
 // pool up to what the next batches need and continues from saved cursors, so
 // nothing is capped and nothing is fetched twice.
 import { hasChannel } from "./discovery-engine.ts";
+import { expandCategories, relatedCategories } from "./categories.ts";
 import { leadSchema, localDate, type Campaign, type Lead } from "./leadgen.ts";
 import { mergeProjectLeads } from "./dedupe.ts";
 import { projectFit } from "./project-fit.ts";
@@ -177,7 +178,7 @@ export async function availability(
       // Overpass counts only where one query covers the tier.
       if (countOsm && plan.osm?.area && src.tags.length && (plan.tier === "locality" || plan.tier === "city"))
         try {
-          row.osm = ((await deps.discover({ action: "osm", count: true, query: { tags: src.tags, include: seg.include, exclude: seg.exclude, area: plan.osm.area, excludeAreas: plan.osm.excludeAreas } })) as { count: number }).count;
+          row.osm = ((await deps.discover({ action: "osm", count: true, query: { tags: src.tags, exclude: seg.exclude, area: plan.osm.area, excludeAreas: plan.osm.excludeAreas } })) as { count: number }).count;
         } catch (e) {
           row.notes.push(`OpenStreetMap count failed: ${msg(e)}`);
         }
@@ -196,10 +197,13 @@ async function globalCountries(p: CustomProject, deps: RunDeps): Promise<Country
     }
   return out;
 }
-const overtureQuery = (plan: TierPlan, seg: Segment): SourceQuery => ({
+/** Every project aims for at least this many available leads, widening to related categories when needed. */
+export const MIN_POOL = 1000;
+const overtureQuery = (plan: TierPlan, seg: Segment, categories = expandCategories(seg.categories)): SourceQuery => ({
   country: plan.country.code,
-  categories: seg.categories,
+  categories,
   include: seg.include,
+  keywords: "widen",
   exclude: seg.exclude,
   area: plan.overture!.area,
   excludeAreas: plan.overture!.excludeAreas,
@@ -231,7 +235,7 @@ export async function topUp(project: Project, leads: Lead[], deps: RunDeps, opti
   if (!health)
     reports.push(report({ source: "Overture Maps", scope: "all", status: "not-configured", message: "Sources service offline (start it with npm run sources), so only OpenStreetMap and Wikidata were searched." }));
   const plans = tierPlans(p, geo, await globalCountries(p, deps), !!health);
-  const want = needs(p, size);
+  const want = needs(p, Math.max(size, MIN_POOL));
   const available = (tier: Tier, seg: string) =>
     running.filter((l) => l.project?.tier === tier && l.project.segmentId === seg && l.project.delivery.status === "available").length;
   const segments = new Map(p.segments.map((s) => [s.id, s]));
@@ -329,7 +333,7 @@ export async function topUp(project: Project, leads: Lead[], deps: RunDeps, opti
           if (pool[key]?.exhausted && !options.fetchAll) continue;
           await paceOsm();
           try {
-            const { elements } = (await deps.discover({ action: "osm", query: { tags: src.tags, include: seg.include, exclude: seg.exclude, area: chunk.area, excludeAreas: plan.osm.excludeAreas } })) as { elements: never[] };
+            const { elements } = (await deps.discover({ action: "osm", query: { tags: src.tags, exclude: seg.exclude, area: chunk.area, excludeAreas: plan.osm.excludeAreas } })) as { elements: never[] };
             const mapped = osmProjectLeads(project, elements, { tier: plan.tier, segmentId: seg.id, tags: src.tags, base: plan.base, country: plan.country.code });
             r.closed += mapped.closed;
             r.excluded += mapped.noChannel;
@@ -379,6 +383,44 @@ export async function topUp(project: Project, leads: Lead[], deps: RunDeps, opti
     }
     await deps.checkpoint?.(incoming.slice(), reports.slice(), { ...pool });
   }
+  // 3b. Below the floor: search neighbouring categories (salons and spas around a makeup artist)
+  // in the same areas, nearest tier first, until the project holds MIN_POOL available leads.
+  const totalAvailable = () => running.filter((l) => l.project?.delivery.status === "available").length;
+  if (health && totalAvailable() < MIN_POOL)
+    for (const plan of plans) {
+      if (!plan.overture || !health.extracts.some((e) => e.country === plan.country.code)) continue;
+      for (const seg of p.segments) {
+        const related = relatedCategories(seg.categories);
+        const key = `${plan.tier}|${seg.id}|ov+|${plan.country.code}`;
+        const state = pool[key] ? { ...pool[key] } : { cursor: "", exhausted: false, fetched: 0 };
+        if (!related.length || state.exhausted || totalAvailable() >= MIN_POOL) continue;
+        deps.onProgress?.({ done: step, total, label: `Related categories · ${seg.label} · ${plan.label}` });
+        const r = report({ source: "Overture Maps (related categories)", scope: plan.tier, area: plan.label, segment: seg.label, status: "ok" });
+        try {
+          while (totalAvailable() < MIN_POOL && !state.exhausted) {
+            const page = await deps.sources.call<{ rows: OvertureRow[]; nextCursor: string; release: string }>("/search", {
+              ...overtureQuery(plan, seg, related),
+              cursor: state.cursor,
+              limit: Math.min(1000, Math.max(100, MIN_POOL - totalAvailable())),
+            });
+            record(page.rows.map((row) => overtureLead(project, row, { tier: plan.tier, segmentId: seg.id, base: plan.base }, page.release)), r);
+            state.fetched += page.rows.length;
+            state.cursor = page.nextCursor || state.cursor;
+            state.exhausted = !page.nextCursor;
+            pool[key] = state;
+          }
+          r.status = r.found ? (state.exhausted ? "ok" : "partial") : "empty";
+          r.message = `${r.found} places from neighbouring categories, added because the pool was below ${MIN_POOL}.`;
+        } catch (e) {
+          r.status = r.found ? "partial" : "failed";
+          r.message = msg(e);
+        }
+        reports.push(r);
+      }
+    }
+  const short = MIN_POOL - totalAvailable();
+  if (health && short > 0)
+    reports.push(report({ source: "Plan", scope: "all", status: "partial", message: `Only ${totalAvailable()} leads exist for these segments and areas, ${short} short of ${MIN_POOL}. Add the State or Country tier, or more categories, to reach ${MIN_POOL}.` }));
   // 4. Website enrichment for leads with a website but no email or Instagram.
   if (p.enrich && health) {
     const r = report({ source: "Website enrichment", scope: "all", status: "ok" });

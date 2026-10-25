@@ -104,25 +104,21 @@ function fakeDeps({ service = true, rows = 300, suppressed } = {}) {
   };
 }
 
-test("top-up pages Overture until the pool covers the next batch, then continues from the cursor", async () => {
+test("top-up aims for the 1000-lead floor even for a small batch, then never refetches", async () => {
   const c = campaign(["locality"]);
   c.custom.enrich = false;
   const { deps } = fakeDeps({ rows: 300 });
   const first = await topUp(c, [], deps, { size: 50 });
   const key = "locality|arch|ov|IN";
-  // 2 × 50 needed: one page of 100.
-  assert.equal(first.pool[key].fetched, 100);
-  assert.equal(first.pool[key].cursor, "ov-0099");
-  assert.equal(first.pool[key].exhausted, false);
+  // 1000 is wanted, only 300 exist: everything is fetched and the search is exhausted.
+  assert.equal(first.pool[key].fetched, 300);
+  assert.equal(first.pool[key].exhausted, true);
   const r = first.reports.find((x) => x.source === "Overture Maps");
-  assert.deepEqual([r.status, r.found, r.added, r.closed], ["partial", 100, 100, 2]);
+  assert.deepEqual([r.status, r.found, r.added, r.closed], ["ok", 300, 300, 2]);
+  assert.ok(first.reports.some((x) => x.source === "Plan" && /short of 1000/.test(x.message)), "the shortfall is reported");
   assert.ok(first.incoming.every((l) => l.score > 0 && /Rule-based fit/.test(l.reason)));
-  // Next run, with those leads delivered, continues after the cursor.
-  const given = first.incoming.map((l) => ({ ...l, project: { ...l.project, delivery: { status: "given", id: "d1", givenAt: "2026-10-23", batch: 1 } } }));
-  const second = await topUp({ ...c, custom: { ...c.custom, pool: first.pool } }, given, deps, { size: 50 });
-  assert.equal(second.incoming[0].name, "Studio ov-0100");
-  const all = await topUp({ ...c, custom: { ...c.custom, pool: second.pool } }, given, deps, { fetchAll: true });
-  assert.equal(all.pool[key].exhausted, true);
+  const second = await topUp({ ...c, custom: { ...c.custom, pool: first.pool } }, first.incoming, deps, { size: 50 });
+  assert.equal(second.incoming.length, 0);
 });
 
 test("service offline: OpenStreetMap only, reported; State is searched district by district", async () => {

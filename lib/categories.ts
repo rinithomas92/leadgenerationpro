@@ -136,3 +136,32 @@ export function browseChildren(parent = ""): BrowseNode[] {
 /** Every selectable category at or below a node. */
 export const categoriesUnder = (id: string) => [...(descendants.get(id) ?? [])].sort();
 export const categoryTotal = rows.length;
+
+// ---------- Widening a segment's categories ----------
+/** The chosen categories plus everything inside them ("Beauty and spa" takes every beauty category). */
+export function expandCategories(ids: string[], cap = 400) {
+  const out = new Set<string>();
+  for (const id of ids) {
+    if (byId.has(id)) out.add(id);
+    for (const d of descendants.get(id) ?? []) out.add(d);
+  }
+  return [...out].slice(0, cap);
+}
+/**
+ * Neighbouring categories: the groups around a category, climbing parents until
+ * there are enough (salons, spas and hair around a makeup artist), minus the chosen ones.
+ */
+export function relatedCategories(ids: string[], cap = 120) {
+  const have = new Set(expandCategories(ids));
+  const out = new Set<string>();
+  for (const id of ids) {
+    const h = byId.get(id)?.[1] ?? [];
+    for (let i = h.length - 2; i >= 0; i--) {
+      const pool = (descendants.get(h[i]) ?? new Set<string>());
+      for (const c of pool) if (!have.has(c)) out.add(c);
+      // Climb until the neighbourhood is big enough, but never to a whole top-level group.
+      if (out.size >= 25 || i <= 1) break;
+    }
+  }
+  return [...out].slice(0, cap);
+}
