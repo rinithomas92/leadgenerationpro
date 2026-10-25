@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Inbox as InboxIcon, Plug, Download, ArrowRight } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -21,9 +21,15 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
-import { emptyWorkspace, metrics, stages, type Workspace } from "@/lib/leadgen";
+import {
+  emptyWorkspace,
+  metrics,
+  stages,
+  type Lead,
+  type Workspace,
+} from "@/lib/leadgen";
 import { Stats, Blank, Field, Choice, download } from "./ui";
-export function Analytics({ state }: { state: Workspace }) {
+export function Analytics({ state, projects }: { state: Workspace; projects?: ReactNode }) {
   const [range, setRange] = useState("All time");
   const [campaign, setCampaign] = useState("all");
   const cutoff =
@@ -156,6 +162,53 @@ export function Analytics({ state }: { state: Workspace }) {
           </TableBody>
         </Table>
       </section>
+      {leads.some((l) => l.kind === "creator") && (
+        <section className="panel">
+          <h2>Gloss creators</h2>
+          <p className="muted">
+            Creator and professional leads by profession and primary platform.
+            Partnered / signed up is the Converted stage recorded manually.
+          </p>
+          <div className="analytics-grid">
+            {(
+              [
+                ["Profession", (l: Lead) => l.creator?.profession || l.industry],
+                ["Platform", (l: Lead) => l.creator?.platform || "Unknown"],
+              ] as const
+            ).map(([label, group]) => {
+              const creators = leads.filter((l) => l.kind === "creator");
+              const keys = [...new Set(creators.map(group))].sort();
+              return (
+                <Table className="data-table" key={label}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{label}</TableHead>
+                      <TableHead>Creators</TableHead>
+                      <TableHead>Contacted</TableHead>
+                      <TableHead>Replies</TableHead>
+                      <TableHead>Partnered / signed up</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {keys.map((k) => {
+                      const x = metrics(creators.filter((l) => group(l) === k));
+                      return (
+                        <TableRow key={k}>
+                          <TableCell>{k}</TableCell>
+                          <TableCell>{x.found}</TableCell>
+                          <TableCell>{x.contacted}</TableCell>
+                          <TableCell>{x.replied}</TableCell>
+                          <TableCell>{x.converted}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <details className="metric-definitions">
         <summary>How these numbers are calculated</summary>
         <p>
@@ -168,6 +221,7 @@ export function Analytics({ state }: { state: Workspace }) {
           inferred.
         </p>
       </details>
+      {projects}
     </>
   );
 }
@@ -205,13 +259,11 @@ export function Settings({
   save,
   busy,
   ai,
-  sample,
 }: {
   state: Workspace;
   save: (s: Workspace, message?: string) => Promise<boolean>;
   busy: boolean;
   ai: boolean;
-  sample: () => void;
 }) {
   const [profile, setProfile] = useState(state.profile);
   const [reset, setReset] = useState(false);
@@ -349,13 +401,6 @@ export function Settings({
             }
           >
             <Download size={16} /> Export workspace
-          </button>
-          <button
-            className="secondary"
-            disabled={busy || state.campaigns.some((c) => c.demo)}
-            onClick={sample}
-          >
-            Add sample workspace
           </button>
           <button
             className="text-button danger"

@@ -7,7 +7,7 @@ import {
   Save,
   Mail,
   ArrowRight,
-  Plus,
+  AtSign,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -15,12 +15,13 @@ import {
   channels,
   uid,
   now,
-  templateDraft,
   type Workspace,
   type Lead,
   type Draft,
 } from "@/lib/leadgen";
+import { displayHandle, outreachDraft } from "@/lib/gloss";
 import { Blank, Field, Choice, download, formatDate } from "./ui";
+import { ProfileButton } from "./creators";
 type Props = {
   state: Workspace;
   save: (s: Workspace, message?: string) => Promise<boolean>;
@@ -28,11 +29,16 @@ type Props = {
   initialLead: string;
   ai: boolean;
 };
+const LEAD_OPTIONS = 200;
 export function Outreach({ state, save, busy, initialLead, ai }: Props) {
   const [leadId, setLeadId] = useState(
     initialLead || state.leads.find((lead) => !lead.demo)?.id || state.leads[0]?.id || "none",
   );
-  const [channel, setChannel] = useState<Draft["channel"]>("Email");
+  const [channel, setChannel] = useState<Draft["channel"]>(() =>
+    state.leads.find((l) => l.id === initialLead)?.creator?.instagram
+      ? "Instagram DM"
+      : "Email",
+  );
   const [tone, setTone] = useState("Warm");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -44,6 +50,18 @@ export function Outreach({ state, save, busy, initialLead, ai }: Props) {
   const [templateName, setTemplateName] = useState("");
   const [templateId, setTemplateId] = useState("none");
   const lead = state.leads.find((l) => l.id === leadId);
+  // The picker lists at most LEAD_OPTIONS matches so large campaigns stay fast.
+  const [leadQuery, setLeadQuery] = useState("");
+  const q = leadQuery.trim().toLowerCase();
+  const matches = q
+    ? state.leads.filter((l) =>
+        `${l.name} ${l.location} ${l.creator?.instagram ?? ""}`.toLowerCase().includes(q),
+      )
+    : state.leads;
+  const leadOptions = [
+    ...(lead && !matches.slice(0, LEAD_OPTIONS).includes(lead) ? [lead] : []),
+    ...matches.slice(0, LEAD_OPTIONS),
+  ];
   const campaign = state.campaigns.find((c) => c.id === lead?.campaignId);
   async function generate() {
     if (!lead || !campaign) return;
@@ -80,7 +98,7 @@ export function Outreach({ state, save, busy, initialLead, ai }: Props) {
   }
   function starter() {
     if (!lead || !campaign) return;
-    const d = templateDraft(lead, campaign, channel, tone, state.profile.name);
+    const d = outreachDraft(lead, campaign, channel, tone, state.profile.name);
     setSubject(d.subject);
     setBody(d.body);
     setMode("template");
@@ -175,10 +193,23 @@ export function Outreach({ state, save, busy, initialLead, ai }: Props) {
                     setMode("");
                     setTemplateId("none");
                   }}
-                  options={state.leads.map((l) => ({
+                  options={leadOptions.map((l) => ({
                     value: l.id,
-                    label: l.name,
+                    label: l.creator?.instagram
+                      ? `${l.name} (${displayHandle(l.creator.instagram)})`
+                      : l.name,
                   }))}
+                />
+              </Field>
+              <Field
+                label="Find a lead"
+                hint={`${matches.length} match${matches.length === 1 ? "" : "es"}${matches.length > LEAD_OPTIONS ? `; showing the first ${LEAD_OPTIONS}` : ""}`}
+              >
+                <input
+                  className="input"
+                  value={leadQuery}
+                  onChange={(e) => setLeadQuery(e.target.value)}
+                  placeholder="Name, location or @handle"
                 />
               </Field>
               <Field label="Channel">
@@ -235,7 +266,16 @@ export function Outreach({ state, save, busy, initialLead, ai }: Props) {
             {lead && (
               <p className="context-line">
                 {campaign?.name} · {lead.industry} · {lead.location}
+                {lead.kind === "creator"
+                  ? ` · ${lead.creator?.partnership}`
+                  : ""}
                 {lead.demo ? " · Fictional sample lead" : ""}
+              </p>
+            )}
+            {channel === "Instagram DM" && (
+              <p className="notice">
+                Instagram DMs are drafts only. Copy the message, open the
+                profile and send it yourself from your own account.
               </p>
             )}
             <div className="button-row">
@@ -365,16 +405,30 @@ export function Outreach({ state, save, busy, initialLead, ai }: Props) {
             <section className="panel preview-panel">
               <span className="eyebrow">MESSAGE PREVIEW</span>
               <div className="preview-address">
-                <Mail size={19} />
+                {channel === "Instagram DM" ? (
+                  <AtSign size={19} />
+                ) : (
+                  <Mail size={19} />
+                )}
                 <span>
                   To: {lead?.name || "Select a lead"}
                   <small>
                     {lead?.demo
                       ? "Sample recipient — not deliverable"
-                      : lead?.email || "No email available"}
+                      : channel === "Instagram DM"
+                        ? displayHandle(lead?.creator?.instagram || "") ||
+                          "No Instagram handle saved"
+                        : channel === "WhatsApp" || channel === "Phone"
+                          ? lead?.phone || "No phone available"
+                          : lead?.email || "No email available"}
                   </small>
                 </span>
               </div>
+              {lead?.kind === "creator" && (
+                <div className="button-row">
+                  <ProfileButton lead={lead} />
+                </div>
+              )}
               <h3>{subject || "Your introduction goes here"}</h3>
               <p className="message-preview">
                 {body || "Your draft will appear here as you write."}

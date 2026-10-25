@@ -61,6 +61,8 @@ export default defineConfig(async () => {
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         inspectorPort: false,
+        // Optional separate local state folder (e.g. a copy of the database for testing).
+        ...(process.env.LEADGEN_PERSIST ? { persistState: { path: process.env.LEADGEN_PERSIST } } : {}),
         config: localBindingConfig,
       }),
     ],

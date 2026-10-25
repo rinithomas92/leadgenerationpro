@@ -8,6 +8,20 @@
       "when": 1789327562265,
       "tag": "0000_needy_spyke",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791526183747,
+      "tag": "0001_lead_rows",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792772580296,
+      "tag": "0002_custom_projects",
+      "breakpoints": true
     }
   ]
 }

@@ -34,11 +34,25 @@ import {
   channels,
   suggestMarkets,
   metrics,
+  audiences,
+  professions,
+  platforms,
+  offerModes,
+  glossSchema,
+  discoverySchema,
   type Workspace,
   type Campaign,
   type Market,
+  type Gloss,
 } from "@/lib/leadgen";
-import { Mark, Stats, Blank, Field, Choice, formatDate } from "./ui";
+import {
+  followerRangeLabel,
+  glossConfig,
+  glossMarkets,
+  isGloss,
+  offerLine,
+} from "@/lib/gloss";
+import { Mark, Stats, Blank, Field, Choice, formatDate, campaignExcelUrl } from "./ui";
 export function CampaignTable({
   campaigns,
   state,
@@ -69,6 +83,7 @@ export function CampaignTable({
           <TableHead>Leads</TableHead>
           <TableHead>Interested</TableHead>
           <TableHead>Status</TableHead>
+          <TableHead>Excel</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -85,6 +100,9 @@ export function CampaignTable({
                       {c.markets.map((m) => m.name).join(", ") || c.description}
                     </small>
                     {c.demo && <span className="mini-label">Demo</span>}
+                    {isGloss(c) && (
+                      <span className="mini-label">{c.audience}</span>
+                    )}
                   </span>
                 </button>
               </TableCell>
@@ -94,6 +112,16 @@ export function CampaignTable({
                 <span className={"status status-" + c.status.toLowerCase()}>
                   {c.status}
                 </span>
+              </TableCell>
+              <TableCell>
+                <a
+                  className="text-button"
+                  href={campaignExcelUrl(c.id)}
+                  download
+                  aria-label={`Download Excel workbook for ${c.name}`}
+                >
+                  Download
+                </a>
               </TableCell>
             </TableRow>
           );
@@ -218,6 +246,27 @@ export function CampaignDetails({
               <span>
                 Created<strong>{formatDate(campaign.createdAt)}</strong>
               </span>
+              {isGloss(campaign) && (
+                <>
+                  <span>
+                    Audience<strong>{campaign.audience}</strong>
+                  </span>
+                  <span>
+                    Platforms
+                    <strong>{glossConfig(campaign).platforms.join(", ")}</strong>
+                  </span>
+                  <span>
+                    Follower range
+                    <strong>{followerRangeLabel(glossConfig(campaign))}</strong>
+                  </span>
+                  <span>
+                    Leads
+                    <strong>
+                      {state.leads.filter((l) => l.campaignId === campaign.id).length}
+                    </strong>
+                  </span>
+                </>
+              )}
             </div>
             <div className="chips">
               {campaign.markets.map((m, i) => (
@@ -226,8 +275,13 @@ export function CampaignDetails({
             </div>
             <p className="muted">
               {state.leads.filter((l) => l.campaignId === campaign.id).length}{" "}
-              saved leads. Search the public business directory or import your
-              business leads. Every result has a source link.
+              saved leads.{" "}
+              {campaign.audience === "Creator Partners"
+                ? "Discovery searches Wikidata and, when configured, YouTube for creators with public profiles, starting with this location; you can also add creators manually or by CSV."
+                : campaign.audience === "Professional Prospects"
+                  ? "Discovery searches OpenStreetMap, Wikidata and, when configured, YouTube, starting with this location and widening to state, country and worldwide."
+                  : "Search the public business directory or import your business leads."}{" "}
+              Every result keeps its source link.
             </p>
             <div className="button-row">
               <button className="primary" onClick={() => onLeads(campaign)}>
@@ -235,11 +289,18 @@ export function CampaignDetails({
               </button>
               <button
                 className="secondary"
-                disabled={busy || campaign.status !== "Active"}
+                disabled={busy || campaign.status !== "Active" || campaign.demo}
                 onClick={() => onSamples(campaign)}
               >
-                Find real businesses
+                {campaign.discovery?.lastRunAt ? "Refresh discovery" : "Run discovery"}
               </button>
+              <a
+                className="secondary"
+                href={campaignExcelUrl(campaign.id)}
+                download
+              >
+                Download Excel
+              </a>
               <button className="secondary" onClick={() => onEdit(campaign)}>
                 Edit campaign
               </button>
@@ -300,7 +361,23 @@ export function MarketBuilder({
   const [mode, setMode] = useState("");
   const set = (key: keyof Campaign, value: unknown) =>
     setC((prev) => ({ ...prev, [key]: value }));
+  const gloss = isGloss(c);
+  const g = glossConfig(c);
+  const setG = (patch: Partial<Gloss>) =>
+    setC((prev) => ({ ...prev, gloss: { ...glossConfig(prev), ...patch } }));
+  const channelChoices = gloss
+    ? (["Instagram DM", "Email", "WhatsApp", "Phone"] as const)
+    : channels.slice(0, 3);
   async function generate() {
+    if (gloss) {
+      // Gloss target markets come from the selected professions.
+      const m = glossMarkets(c);
+      setMarkets(m);
+      setSelected(m.map((_, i) => i));
+      setMode("starter");
+      setStep(2);
+      return;
+    }
     setGenerating(true);
     try {
       const r = await fetch("/api/generate", {
@@ -411,6 +488,44 @@ export function MarketBuilder({
                 />
               </Field>
             </div>
+            {(c.theme === 0 || gloss) && (
+              <div className="span-2">
+                <Field
+                  label="Target audience"
+                  hint="Creator partners and professional prospects are kept in separate campaigns."
+                >
+                  <Choice
+                    label="Target audience"
+                    value={c.audience}
+                    onChange={(v) =>
+                      setC((prev) => ({
+                        ...prev,
+                        audience: v as Campaign["audience"],
+                        gloss:
+                          v === "General"
+                            ? prev.gloss
+                            : prev.gloss ?? glossSchema.parse({}),
+                        channels:
+                          v === "General"
+                            ? prev.channels.filter((x) => x !== "Instagram DM")
+                            : prev.channels.includes("Instagram DM")
+                              ? prev.channels
+                              : ["Instagram DM", ...prev.channels],
+                      }))
+                    }
+                    options={audiences.map((a) => ({
+                      value: a,
+                      label:
+                        a === "General"
+                          ? "Businesses (general campaign)"
+                          : a === "Creator Partners"
+                            ? "Creator / influencer partners"
+                            : "Gloss professional prospects",
+                    }))}
+                  />
+                </Field>
+              </div>
+            )}
             <Field label="Target location">
               <input
                 className="input"
@@ -429,6 +544,165 @@ export function MarketBuilder({
                 placeholder="e.g. 25 km; directory search uses city boundaries"
               />
             </Field>
+            {gloss && (
+              <>
+                <div className="span-2">
+                  <p className="field-label">Professions</p>
+                  <div className="button-row">
+                    {professions.map((p) => (
+                      <label className="check-label" key={p}>
+                        <Checkbox
+                          checked={g.professions.includes(p)}
+                          onCheckedChange={(v) =>
+                            setG({
+                              professions: v
+                                ? professions.filter(
+                                    (x) => x === p || g.professions.includes(x),
+                                  )
+                                : g.professions.filter((x) => x !== p),
+                            })
+                          }
+                        />
+                        {p}
+                      </label>
+                    ))}
+                  </div>
+                  <small className="muted">
+                    Makeup artists and hairstylists are the recommended launch
+                    focus.
+                  </small>
+                </div>
+                <div className="span-2">
+                  <p className="field-label">Preferred platforms</p>
+                  <div className="button-row">
+                    {platforms.map((p) => (
+                      <label className="check-label" key={p}>
+                        <Checkbox
+                          checked={g.platforms.includes(p)}
+                          onCheckedChange={(v) =>
+                            setG({
+                              platforms: v
+                                ? platforms.filter(
+                                    (x) => x === p || g.platforms.includes(x),
+                                  )
+                                : g.platforms.filter((x) => x !== p),
+                            })
+                          }
+                        />
+                        {p === "Website" ? "Website / portfolio" : p}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <Field
+                  label="Minimum followers"
+                  hint={followerRangeLabel(g)}
+                >
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={g.followerMin || ""}
+                    onChange={(e) =>
+                      setG({ followerMin: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
+                    }
+                    placeholder="0"
+                  />
+                </Field>
+                <Field label="Maximum followers" hint="Leave empty for no limit.">
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={g.followerMax || ""}
+                    onChange={(e) =>
+                      setG({ followerMax: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
+                    }
+                    placeholder="No limit"
+                  />
+                </Field>
+                <Field label="Relevant keywords">
+                  <input
+                    className="input"
+                    maxLength={300}
+                    value={g.keywords}
+                    onChange={(e) => setG({ keywords: e.target.value })}
+                    placeholder="e.g. bridal, airbrush, editorial"
+                  />
+                </Field>
+                <Field
+                  label="Starter offer in drafts"
+                  hint="Proposed terms are labelled as not final in every draft."
+                >
+                  <Choice
+                    label="Starter offer in drafts"
+                    value={g.offerMode}
+                    onChange={(v) => setG({ offerMode: v as Gloss["offerMode"] })}
+                    options={offerModes.map((m) => ({
+                      value: m,
+                      label:
+                        m === "Proposed"
+                          ? "Include, marked as proposed"
+                          : m === "Confirmed"
+                            ? "Include as confirmed terms"
+                            : "Do not mention pricing",
+                    }))}
+                  />
+                </Field>
+                <Field label="Starter offer wording">
+                  <input
+                    className="input"
+                    maxLength={300}
+                    disabled={g.offerMode === "Omit"}
+                    value={g.offer}
+                    onChange={(e) => setG({ offer: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label="Automatic discovery refresh"
+                  hint="Re-runs discovery when you open the workspace and the last run is older than this."
+                >
+                  <Choice
+                    label="Automatic discovery refresh"
+                    value={String(c.discovery?.autoRefreshDays ?? 0)}
+                    onChange={(v) =>
+                      setC((prev) => ({
+                        ...prev,
+                        discovery: {
+                          ...(prev.discovery ?? discoverySchema.parse({})),
+                          autoRefreshDays: Number(v),
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: "0", label: "Off" },
+                      { value: "1", label: "Daily" },
+                      { value: "7", label: "Weekly" },
+                      { value: "30", label: "Monthly" },
+                    ]}
+                  />
+                </Field>
+                {c.audience === "Creator Partners" && (
+                  <div className="span-2">
+                    <Field
+                      label="Partner commission or terms (optional)"
+                      hint="Left empty, drafts never mention commission amounts."
+                    >
+                      <input
+                        className="input"
+                        maxLength={300}
+                        value={g.commission}
+                        onChange={(e) => setG({ commission: e.target.value })}
+                        placeholder="Only add terms that have been agreed for outreach"
+                      />
+                    </Field>
+                  </div>
+                )}
+                {offerLine(g) && (
+                  <p className="span-2 notice">Draft wording: {offerLine(g)}</p>
+                )}
+              </>
+            )}
             <Field label="Preferred customer (optional)">
               <input
                 className="input"
@@ -461,7 +735,7 @@ export function MarketBuilder({
             <div className="span-2">
               <p className="field-label">Preferred outreach channels</p>
               <div className="button-row">
-                {channels.slice(0, 3).map((ch) => (
+                {channelChoices.map((ch) => (
                   <label className="check-label" key={ch}>
                     <Checkbox
                       checked={c.channels.includes(ch)}
@@ -487,16 +761,24 @@ export function MarketBuilder({
               </p>
               <button
                 className="primary"
-                disabled={generating || !c.channels.length}
+                disabled={
+                  generating ||
+                  !c.channels.length ||
+                  (gloss && !g.professions.length)
+                }
               >
                 {generating ? (
                   <LoaderCircle size={17} className="animate-spin" />
                 ) : (
                   <Sparkles size={17} />
                 )}{" "}
-                {generating ? "Finding possibilities…" : "Suggest markets"}
+                {generating
+                  ? "Finding possibilities…"
+                  : gloss
+                    ? "Review target professions"
+                    : "Suggest markets"}
               </button>
-              {ai && (
+              {ai && !gloss && (
                 <button
                   type="button"
                   className="text-button"

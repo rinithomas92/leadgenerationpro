@@ -125,7 +125,14 @@ export function Stats({ leads }: { leads: Lead[] }) {
     </div>
   );
 }
-export function download(name: string, body: string, type = "text/plain") {
+/** Server-generated workbook with every lead in the campaign. */
+export const campaignExcelUrl = (campaignId: string) =>
+  `/api/export?campaign=${encodeURIComponent(campaignId)}`;
+export function download(
+  name: string,
+  body: BlobPart,
+  type = "text/plain",
+) {
   const url = URL.createObjectURL(new Blob([body], { type }));
   const a = document.createElement("a");
   a.href = url;
