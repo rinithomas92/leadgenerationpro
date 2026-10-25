@@ -2,7 +2,7 @@
 // Five-step brief for a custom lead project: business, target segments,
 // location and reach, tier split, availability preview. Rule-based only.
 import { useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Plus, Trash2, TriangleAlert, X, MapPin } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronRight, Plus, Search, Trash2, TriangleAlert, X, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { Field } from "./ui";
 import { SplitEditor, TierPicker, AvailabilityTable } from "./project-parts";
@@ -17,7 +17,7 @@ import {
   splitErrors,
   tierErrors,
 } from "@/lib/project";
-import { categoryLabel, countryList, suggestCategories } from "@/lib/categories";
+import { browseChildren, categoriesUnder, categoryLabel, categoryTotal, countryList, readableCategory, suggestCategories } from "@/lib/categories";
 import { tiers as tierOrder, type Segment, type Tier } from "@/lib/project-schema";
 import { uid, type Campaign } from "@/lib/leadgen";
 import type { ProjectGeo } from "@/lib/project-net";
@@ -34,6 +34,81 @@ type Props = {
 };
 const steps = ["Business", "Segments", "Location and reach", "Tier split", "Availability"];
 const firstSentence = (s: string) => (s.trim().match(/^[^.!?]+[.!?]?/)?.[0] ?? s).trim().slice(0, 300);
+
+/** Browse every category: pick a group, drill down, add single ones or a whole group; or search all. */
+function CategoryBrowser({ selected, onAdd }: { selected: string[]; onAdd: (ids: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const [trail, setTrail] = useState<string[]>([]);
+  const [q, setQ] = useState("");
+  const parent = trail[trail.length - 1] ?? "";
+  const nodes = useMemo(() => browseChildren(parent), [parent]);
+  const results = useMemo(() => (q.trim().length >= 2 ? suggestCategories(q, 40) : []), [q]);
+  if (!open)
+    return (
+      <button className="text-button" onClick={() => setOpen(true)}>
+        <Search size={15} /> Browse all {categoryTotal.toLocaleString()} categories
+      </button>
+    );
+  const add = (ids: string[]) => onAdd(ids.filter((id) => !selected.includes(id)));
+  return (
+    <div className="category-browser">
+      <div className="section-title">
+        <small className="muted">Browse all categories</small>
+        <button className="text-button" onClick={() => setOpen(false)}>Close</button>
+      </div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search all categories, e.g. dentist, cafe, gym" aria-label="Search categories" />
+      {q.trim().length >= 2 ? (
+        <div className="chips">
+          {results.length ? (
+            results.map((s) => (
+              <button key={s.id} className={selected.includes(s.id) ? "chip chip-on" : "chip"} title={s.path} disabled={selected.includes(s.id)} onClick={() => add([s.id])}>
+                {selected.includes(s.id) ? <Check size={12} /> : <Plus size={12} />} {s.label}
+              </button>
+            ))
+          ) : (
+            <span className="muted">No categories match “{q}”. Try a broader word.</span>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="chips">
+            <button className="chip" onClick={() => setTrail([])}>All groups</button>
+            {trail.map((id, i) => (
+              <button key={id} className="chip" onClick={() => setTrail(trail.slice(0, i + 1))}>› {readableCategory(id)}</button>
+            ))}
+          </div>
+          {parent && (
+            <button className="text-button" onClick={() => add(categoriesUnder(parent))}>
+              <Plus size={14} /> Add all {categoriesUnder(parent).length} in {readableCategory(parent)}
+            </button>
+          )}
+          <div className="chips category-list">
+            {nodes.map((n) => {
+              const hasKids = browseChildren(n.id).length > 0;
+              const on = selected.includes(n.id);
+              return (
+                <span key={n.id} className="chip-split">
+                  {n.selectable ? (
+                    <button className={on ? "chip chip-on" : "chip"} disabled={on} onClick={() => add([n.id])}>
+                      {on ? <Check size={12} /> : <Plus size={12} />} {n.label}
+                    </button>
+                  ) : (
+                    <span className="chip chip-soft">{n.label}</span>
+                  )}
+                  {hasKids && (
+                    <button className="chip" onClick={() => setTrail([...trail, n.id])} aria-label={`Open ${n.label}`}>
+                      {n.count} <ChevronRight size={12} />
+                    </button>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function SegmentEditor({ segment, onChange, onRemove, related }: { segment: Segment; onChange: (s: Segment) => void; onRemove?: () => void; related: string[] }) {
   const [inc, setInc] = useState("");
@@ -104,6 +179,7 @@ function SegmentEditor({ segment, onChange, onRemove, related }: { segment: Segm
           </div>
         </div>
       )}
+      <CategoryBrowser selected={segment.categories} onAdd={(ids) => onChange({ ...segment, categories: [...new Set([...segment.categories, ...ids])] })} />
       <div className="form-grid">
         <Field label="Include keywords (optional)" hint="Only names containing one of these, comma-separated.">
           <input value={inc} onChange={(e) => setInc(e.target.value)} onBlur={() => { if (inc.trim()) { onChange({ ...segment, include: [...new Set([...segment.include, ...words(inc)])] }); setInc(""); } }} placeholder="e.g. design, interiors" />

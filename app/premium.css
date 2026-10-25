@@ -1260,3 +1260,8 @@ ul.notes { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
 .quality-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
 .quality-grid h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 16px; }
 .quality-grid small { display: block; margin-top: 6px; }
+
+.category-browser { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; }
+.category-list { max-height: 320px; overflow-y: auto; }
+.chip-split { display: inline-flex; gap: 2px; }
+.chips .chip:disabled { opacity: 0.7; cursor: default; }

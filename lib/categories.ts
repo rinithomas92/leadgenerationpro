@@ -113,3 +113,26 @@ const list = countryRows
   .map(([code, name, bbox]) => ({ code, name: englishName(code, name), bbox: { w: bbox[0], s: bbox[1], e: bbox[2], n: bbox[3] } }))
   .sort((a, b) => a.name.localeCompare(b.name));
 export const countryList = () => list;
+
+// ---------- Browsing the full taxonomy ----------
+export type BrowseNode = { id: string; label: string; selectable: boolean; count: number };
+const childMap = new Map<string, Map<string, string[]>>();
+for (const [, hierarchy] of rows) {
+  for (let i = 0; i < hierarchy.length; i++) {
+    const parent = i === 0 ? "" : hierarchy[i - 1];
+    const kids = childMap.get(parent) ?? new Map<string, string[]>();
+    if (!kids.has(hierarchy[i])) kids.set(hierarchy[i], []);
+    childMap.set(parent, kids);
+  }
+}
+const descendants = new Map<string, Set<string>>();
+for (const [id, hierarchy] of rows) for (const h of hierarchy) (descendants.get(h) ?? descendants.set(h, new Set()).get(h)!).add(id);
+/** Children of a node ("" = top level), A–Z, with how many categories sit inside each. */
+export function browseChildren(parent = ""): BrowseNode[] {
+  return [...(childMap.get(parent)?.keys() ?? [])]
+    .map((id) => ({ id, label: readableCategory(id), selectable: byId.has(id), count: descendants.get(id)?.size ?? 0 }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+/** Every selectable category at or below a node. */
+export const categoriesUnder = (id: string) => [...(descendants.get(id) ?? [])].sort();
+export const categoryTotal = rows.length;
