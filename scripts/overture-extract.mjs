@@ -5,6 +5,7 @@
 //   npm run overture:extract                  # India, latest release
 //   npm run overture:extract -- AE GB         # other countries
 //   npm run overture:extract -- IN --release 2026-10-21.0
+//   npm run overture:extract -- --all         # every country in one pass (recommended for worldwide use)
 //
 // Data: Overture Maps Foundation, Places theme (CDLA-Permissive-2.0 / Apache-2.0
 // per source). Reads anonymously from Overture's public S3 bucket; no account
@@ -13,6 +14,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, existsSync 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";
+import { extractAllCountries } from "./extract-common.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const dataDir = process.env.OVERTURE_DATA || path.join(root, "data", "overture");
@@ -42,6 +44,12 @@ export async function extract(countries, release, log = console.log) {
   const db = await DuckDBInstance.create(":memory:");
   const c = await db.connect();
   await c.run("INSTALL httpfs; LOAD httpfs; SET s3_region = 'us-west-2';");
+  if (countries === "all") {
+    const selectSql = `SELECT addresses[1].country AS cc, id, names, basic_category, taxonomy, confidence, operating_status, addresses, phones, emails, websites, socials, brand, sources, bbox
+      FROM read_parquet('${bucket}/${release}/theme=places/type=place/*', hive_partitioning=1)
+      WHERE regexp_matches(coalesce(addresses[1].country, ''), '^[A-Z]{2}$')`;
+    return extractAllCountries(c, { dataDir, release, selectSql, log });
+  }
   for (const cc of countries) {
     if (!/^[A-Z]{2}$/.test(cc)) throw new Error(`Not an ISO country code: ${cc}`);
     const started = Date.now();
@@ -85,5 +93,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   let release = at >= 0 ? args[at + 1] : "latest";
   const countries = args.filter((a, i) => !a.startsWith("--") && (at < 0 || i !== at + 1)).map((a) => a.toUpperCase());
   if (release === "latest") release = await latestRelease();
-  await extract(countries.length ? countries : ["IN"], release);
+  await extract(args.includes("--all") ? "all" : countries.length ? countries : ["IN"], release);
 }

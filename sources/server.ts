@@ -36,7 +36,7 @@ export function sourcesServer(options: Options = {}) {
   const origins = new Set(options.origins ?? defaultOrigins);
   const overture = new Overture(dataDir);
   // Foursquare Open Source Places, extracted into the same layout (npm run fsq:extract).
-  const fsqDir = options.fsqDir ?? path.join(root, "data", "foursquare");
+  const fsqDir = options.fsqDir ?? (options.dataDir ? path.join(options.dataDir, "_foursquare") : path.join(root, "data", "foursquare"));
   const foursquare = new Overture(fsqDir);
   const from = (b: unknown) => ((b as { source?: string } | null)?.source === "foursquare" ? foursquare : overture);
   const checks = createChecks(options.checks);

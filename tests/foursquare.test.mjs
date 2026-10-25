@@ -39,7 +39,7 @@ before(async () => {
   mkdirSync(path.join(dir, "ov"), { recursive: true });
   const file = path.join(dir, "fsq", "2026-01-12", "IN.parquet").replace(/\\/g, "/");
   const c = await (await DuckDBInstance.create(":memory:")).connect();
-  const map = `MAP {'Beauty Salon': 'beauty_salon', 'Makeup Artist': 'makeup_artist', 'Cosmetics Store': 'cosmetics_store', 'Unheard Of Place': 'unheard_of_place'}`;
+  const map = `MAP {'Business and Professional Services > Beauty Salon': 'beauty_salon', 'Business and Professional Services > Makeup Artist': 'makeup_artist', 'Retail > Cosmetics Store': 'cosmetics_store', 'Something > Unheard Of Place': 'unheard_of_place'}`;
   await c.run(`COPY (${reshapeSql(places.map(rowSql).join("\nUNION ALL\n"), map)}) TO '${file}' (FORMAT parquet)`);
   writeFileSync(path.join(dir, "fsq", "manifest.json"), JSON.stringify({ releases: { "2026-01-12": { IN: { file: "2026-01-12/IN.parquet", rows: places.length, extractedAt: "2026-01-13T00:00:00Z" } } } }));
   server = sourcesServer({ dataDir: path.join(dir, "ov"), fsqDir: path.join(dir, "fsq") });
