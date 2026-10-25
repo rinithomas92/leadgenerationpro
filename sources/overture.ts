@@ -25,6 +25,8 @@ export const areaSchema = z.discriminatedUnion("kind", [
 export type Area = z.infer<typeof areaSchema>;
 const keyword = z.string().trim().min(1).max(80);
 export const querySchema = z.object({
+  // Which extract to search; the service picks it before parsing.
+  source: z.enum(["overture", "foursquare"]).optional(),
   country: z.string().regex(/^[A-Z]{2}$/),
   categories: z.array(z.string().regex(/^[a-z0-9_]{1,80}$/)).min(1).max(400),
   include: z.array(keyword).max(30).default([]),

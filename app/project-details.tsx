@@ -107,7 +107,7 @@ export function ProjectDetails(props: Props) {
         {health === undefined
           ? "Checking the local sources service…"
           : health
-            ? `Sources service running · ${health.extracts.length ? health.extracts.map((e) => `${e.country} ${e.release} (${e.rows.toLocaleString()} places)`).join(", ") : "no Overture extracts yet (npm run overture:extract)"}`
+            ? `Sources service running · ${health.extracts.length ? health.extracts.map((e) => `${e.source === "foursquare" ? "Foursquare " : ""}${e.country} ${e.release} (${e.rows.toLocaleString()} places)`).join(", ") : "no Overture extracts yet (npm run overture:extract)"}`
             : "Sources service offline: discovery uses OpenStreetMap and Wikidata only. Start it with npm run sources."}
         <button className="text-button" onClick={props.onRefreshHealth}>
           Check again

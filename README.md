@@ -185,6 +185,7 @@ npm run sources                     # start the service; keep it running while y
 
 - Extracts are saved to `data/overture/<release>/<country>.parquet`, which Git ignores. Re-run the command, or press **Update** under **Data quality** on a project, to move to Overture's newest monthly release.
 - `npm run overture:taxonomy` regenerates the category list and country list from a release.
+- Optional second source, Foursquare Open Source Places (Apache-2.0): it is gated on Hugging Face, so sign in at <https://huggingface.co/datasets/foursquare/fsq-os-places>, accept the terms and create a read token. Then `$env:HF_TOKEN = "hf_..."` (bash: `export HF_TOKEN=hf_...`) and `npm run fsq:extract` (or `-- AE GB`). The extract is reshaped into the Overture layout in `data/foursquare/` (Git-ignored); restart `npm run sources` and discovery searches it alongside Overture. Places found by both merge into one lead.
 - The service answers only the app's own origins (`http://127.0.0.1:5187`, `http://localhost:5187`). Add more with `LEADGEN_ORIGINS=http://127.0.0.1:5190`.
 - Email checks use DNS MX lookups. If your system's DNS refuses them, the service falls back to public resolvers (1.1.1.1, 9.9.9.9). Set `LEADGEN_DNS=192.168.0.1` to choose your own.
 

@@ -18,7 +18,7 @@ export const defaultOrigins = ["http://127.0.0.1:5187", "http://localhost:5187"]
 const root = fileURLToPath(new URL("../", import.meta.url));
 
 type Route = (body: unknown) => Promise<unknown>;
-export type Options = { dataDir?: string; origins?: string[]; routes?: Record<string, Route>; checks?: CheckDeps; latest?: () => Promise<string> };
+export type Options = { dataDir?: string; fsqDir?: string; origins?: string[]; routes?: Record<string, Route>; checks?: CheckDeps; latest?: () => Promise<string> };
 
 async function readBody(req: IncomingMessage, limit = 2_000_000) {
   let size = 0;
@@ -35,12 +35,16 @@ export function sourcesServer(options: Options = {}) {
   const dataDir = options.dataDir ?? path.join(root, "data", "overture");
   const origins = new Set(options.origins ?? defaultOrigins);
   const overture = new Overture(dataDir);
+  // Foursquare Open Source Places, extracted into the same layout (npm run fsq:extract).
+  const fsqDir = options.fsqDir ?? path.join(root, "data", "foursquare");
+  const foursquare = new Overture(fsqDir);
+  const from = (b: unknown) => ((b as { source?: string } | null)?.source === "foursquare" ? foursquare : overture);
   const checks = createChecks(options.checks);
   const updater = createUpdater(root, options.latest ?? (() => latestRelease()));
   const routes: Record<string, Route> = {
-    "/count": (b) => overture.count(querySchema.parse(b)),
-    "/search": (b) => overture.search(searchSchema.parse(b)),
-    "/lookup": (b) => overture.lookup(lookupSchema.parse(b)),
+    "/count": (b) => from(b).count(querySchema.parse(b)),
+    "/search": (b) => from(b).search(searchSchema.parse(b)),
+    "/lookup": (b) => from(b).lookup(lookupSchema.parse(b)),
     "/enrich": createEnricher(),
     "/check-email": checks.emails,
     "/check-website": checks.websites,
@@ -73,7 +77,11 @@ export function sourcesServer(options: Options = {}) {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     try {
       if (req.method === "GET" && url.pathname === "/health")
-        return send(res, 200, { ok: true, service: "leadgen-sources", extracts: extracts(dataDir).map(({ file: _f, ...e }) => e) });
+        return send(res, 200, { ok: true, service: "leadgen-sources", extracts: [
+            ...extracts(dataDir).map(({ file: _f, ...e }) => ({ source: "overture", ...e })),
+            ...extracts(fsqDir).map(({ file: _f, ...e }) => ({ source: "foursquare", ...e })),
+          ],
+        });
       if (req.method === "GET" && getRoutes[url.pathname]) return send(res, 200, await getRoutes[url.pathname]());
       const route = routes[url.pathname];
       if (req.method !== "POST" || !route) return send(res, 404, { error: "Not found." });

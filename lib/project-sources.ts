@@ -23,7 +23,10 @@ export type SourceQuery = {
   area: Area;
   excludeAreas?: Area[];
 };
-export type Health = { ok: boolean; extracts: { country: string; release: string; rows: number; extractedAt: string }[] };
+export type SourceId = "overture" | "foursquare";
+/** How a place from one extract is credited on its lead. */
+export type SourceTag = { name: string; prefix: string; licence: string };
+export type Health = { ok: boolean; extracts: { source?: SourceId; country: string; release: string; rows: number; extractedAt: string }[] };
 export type Counts = { total: number; closed: number; noChannel: number; reachable: number; release: string };
 export type OvertureRow = {
   id: string;
@@ -108,6 +111,7 @@ export function overtureLead(
   row: OvertureRow,
   where: { tier: Tier; segmentId: string; base?: { lat: number; lon: number } },
   release: string,
+  tag: SourceTag = { name: "Overture Maps", prefix: "ov", licence: "CDLA-Permissive-2.0" },
 ): Lead {
   const updated = (row.sources ?? []).map((s) => s.update_time?.slice(0, 10) || "").filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().at(-1) || "";
   const datasets = [...new Set((row.sources ?? []).map((s) => s.dataset).filter(Boolean))].join(", ");
@@ -118,10 +122,10 @@ export function overtureLead(
     segmentId: where.segmentId,
     tier: where.tier,
     source: {
-      name: "Overture Maps",
-      id: `ov:${row.id}`,
+      name: tag.name,
+      id: `${tag.prefix}:${row.id}`,
       url: "",
-      label: `Overture Maps Places ${release} (${datasets || "Overture"}; CDLA-Permissive-2.0) · record ${row.id}`,
+      label: `${tag.name === "Overture Maps" ? "Overture Maps Places" : tag.name} ${release} (${datasets || tag.name}; ${tag.licence}) · record ${row.id}`,
     },
     category: readable(category),
     location: [city, row.region, row.country].filter(Boolean).join(", "),

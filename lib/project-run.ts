@@ -13,7 +13,7 @@ import { leadSchema, localDate, type Campaign, type Lead } from "./leadgen.ts";
 import { mergeProjectLeads } from "./dedupe.ts";
 import { projectFit } from "./project-fit.ts";
 import { isSuppressed, type SuppressionIndex } from "./suppression.ts";
-import { overtureLead, socialFields, type Area, type Counts, type Health, type OvertureRow, type SourceQuery } from "./project-sources.ts";
+import { overtureLead, socialFields, type Area, type Counts, type Health, type OvertureRow, type SourceId, type SourceQuery, type SourceTag } from "./project-sources.ts";
 import { osmProjectLeads, wikidataProjectLeads, type OsmArea, type TagSet } from "./project-osm.ts";
 import { targets, tierLabel } from "./allocation.ts";
 import { batchSizes, type CustomProject, type ProjectReport, type Segment, type Tier } from "./project-schema.ts";
@@ -167,7 +167,7 @@ export async function availability(
       const src = deps.sourcesFor(seg);
       const row: Availability = { tier: plan.tier, label: plan.label, segmentId: seg.id, notes: [...plan.skipped] };
       if (health && plan.overture && seg.categories.length) {
-        if (!health.extracts.some((e) => e.country === plan.country.code)) row.notes.push(`No Overture extract for ${plan.country.code}; run npm run overture:extract -- ${plan.country.code}.`);
+        if (!hasExtract(health, "overture", plan.country.code)) row.notes.push(`No Overture extract for ${plan.country.code}; run npm run overture:extract -- ${plan.country.code}.`);
         else
           try {
             row.overture = await deps.sources.call<Counts>("/count", overtureQuery(plan, seg));
@@ -208,6 +208,13 @@ const overtureQuery = (plan: TierPlan, seg: Segment, categories = expandCategori
   area: plan.overture!.area,
   excludeAreas: plan.overture!.excludeAreas,
 });
+
+/** Whether the service holds an extract of this source for the country (Overture entries may predate the source field). */
+const hasExtract = (health: Health, source: SourceId, country: string) => health.extracts.some((e) => (e.source ?? "overture") === source && e.country === country);
+const SOURCES: { id: SourceId; name: string; key: string; tag: SourceTag }[] = [
+  { id: "overture", name: "Overture Maps", key: "ov", tag: { name: "Overture Maps", prefix: "ov", licence: "CDLA-Permissive-2.0" } },
+  { id: "foursquare", name: "Foursquare Places", key: "fsq", tag: { name: "Foursquare Open Source Places", prefix: "fsq", licence: "Apache-2.0" } },
+];
 
 // ---------- Top-up ----------
 export type TopUpOptions = { size?: number; fetchAll?: boolean };
@@ -272,12 +279,14 @@ export async function topUp(project: Project, leads: Lead[], deps: RunDeps, opti
       const need = () => (options.fetchAll ? Infinity : (want[`${plan.tier}|${seg.id}`] ?? 0) - available(plan.tier, seg.id));
       if (need() <= 0) continue;
       const src = deps.sourcesFor(seg);
-      // 1. Overture, paged by a stable cursor.
-      if (health && plan.overture && seg.categories.length) {
-        const key = `${plan.tier}|${seg.id}|ov|${plan.country.code}`;
+      // 1. Overture and Foursquare extracts, each paged by a stable cursor.
+      for (const src1 of SOURCES) {
+        if (!health || !plan.overture || !seg.categories.length) break;
+        if (src1.id === "foursquare" && !hasExtract(health, "foursquare", plan.country.code)) continue;
+        const key = `${plan.tier}|${seg.id}|${src1.key}|${plan.country.code}`;
         const state = pool[key] ? { ...pool[key] } : { cursor: "", exhausted: false, fetched: 0 };
-        const r = report({ source: "Overture Maps", scope: plan.tier, area: plan.label, segment: seg.label, status: "ok" });
-        if (!health.extracts.some((e) => e.country === plan.country.code)) {
+        const r = report({ source: src1.name, scope: plan.tier, area: plan.label, segment: seg.label, status: "ok" });
+        if (!hasExtract(health, src1.id, plan.country.code)) {
           r.status = "not-configured";
           r.message = `No Overture extract for ${plan.country.code}. Run: npm run overture:extract -- ${plan.country.code}`;
         } else if (state.exhausted) {
@@ -288,16 +297,17 @@ export async function topUp(project: Project, leads: Lead[], deps: RunDeps, opti
             while (need() > 0 && !state.exhausted) {
               const page = await deps.sources.call<{ rows: OvertureRow[]; nextCursor: string; release: string }>("/search", {
                 ...overtureQuery(plan, seg),
+                source: src1.id,
                 cursor: state.cursor,
                 limit: Math.min(1000, Math.max(100, need() === Infinity ? 1000 : need())),
               });
-              record(page.rows.map((row) => overtureLead(project, row, { tier: plan.tier, segmentId: seg.id, base: plan.base }, page.release)), r);
+              record(page.rows.map((row) => overtureLead(project, row, { tier: plan.tier, segmentId: seg.id, base: plan.base }, page.release, src1.tag)), r);
               state.fetched += page.rows.length;
               state.cursor = page.nextCursor || state.cursor;
               state.exhausted = !page.nextCursor;
               pool[key] = state;
             }
-            const c = await deps.sources.call<Counts>("/count", overtureQuery(plan, seg)).catch(() => undefined);
+            const c = await deps.sources.call<Counts>("/count", { ...overtureQuery(plan, seg), source: src1.id }).catch(() => undefined);
             if (c) {
               r.closed = c.closed;
               r.excluded += c.noChannel;
@@ -387,37 +397,37 @@ export async function topUp(project: Project, leads: Lead[], deps: RunDeps, opti
   // in the same areas, nearest tier first, until the project holds MIN_POOL available leads.
   const totalAvailable = () => running.filter((l) => l.project?.delivery.status === "available").length;
   if (health && totalAvailable() < MIN_POOL)
-    for (const plan of plans) {
-      if (!plan.overture || !health.extracts.some((e) => e.country === plan.country.code)) continue;
-      for (const seg of p.segments) {
-        const related = relatedCategories(seg.categories);
-        const key = `${plan.tier}|${seg.id}|ov+|${plan.country.code}`;
-        const state = pool[key] ? { ...pool[key] } : { cursor: "", exhausted: false, fetched: 0 };
-        if (!related.length || state.exhausted || totalAvailable() >= MIN_POOL) continue;
-        deps.onProgress?.({ done: step, total, label: `Related categories · ${seg.label} · ${plan.label}` });
-        const r = report({ source: "Overture Maps (related categories)", scope: plan.tier, area: plan.label, segment: seg.label, status: "ok" });
-        try {
-          while (totalAvailable() < MIN_POOL && !state.exhausted) {
-            const page = await deps.sources.call<{ rows: OvertureRow[]; nextCursor: string; release: string }>("/search", {
-              ...overtureQuery(plan, seg, related),
-              cursor: state.cursor,
-              limit: Math.min(1000, Math.max(100, MIN_POOL - totalAvailable())),
-            });
-            record(page.rows.map((row) => overtureLead(project, row, { tier: plan.tier, segmentId: seg.id, base: plan.base }, page.release)), r);
-            state.fetched += page.rows.length;
-            state.cursor = page.nextCursor || state.cursor;
-            state.exhausted = !page.nextCursor;
-            pool[key] = state;
+    for (const plan of plans)
+      for (const seg of p.segments)
+        for (const src1 of SOURCES) {
+          const related = relatedCategories(seg.categories);
+          const key = `${plan.tier}|${seg.id}|${src1.key}+|${plan.country.code}`;
+          const state = pool[key] ? { ...pool[key] } : { cursor: "", exhausted: false, fetched: 0 };
+          if (!plan.overture || !hasExtract(health, src1.id, plan.country.code) || !related.length || state.exhausted || totalAvailable() >= MIN_POOL) continue;
+          deps.onProgress?.({ done: step, total, label: `Related categories · ${seg.label} · ${plan.label}` });
+          const r = report({ source: `${src1.name} (related categories)`, scope: plan.tier, area: plan.label, segment: seg.label, status: "ok" });
+          try {
+            while (totalAvailable() < MIN_POOL && !state.exhausted) {
+              const page = await deps.sources.call<{ rows: OvertureRow[]; nextCursor: string; release: string }>("/search", {
+                ...overtureQuery(plan, seg, related),
+                source: src1.id,
+                cursor: state.cursor,
+                limit: Math.min(1000, Math.max(100, MIN_POOL - totalAvailable())),
+              });
+              record(page.rows.map((row) => overtureLead(project, row, { tier: plan.tier, segmentId: seg.id, base: plan.base }, page.release, src1.tag)), r);
+              state.fetched += page.rows.length;
+              state.cursor = page.nextCursor || state.cursor;
+              state.exhausted = !page.nextCursor;
+              pool[key] = state;
+            }
+            r.status = r.found ? (state.exhausted ? "ok" : "partial") : "empty";
+            r.message = `${r.found} places from neighbouring categories, added because the pool was below ${MIN_POOL}.`;
+          } catch (e) {
+            r.status = r.found ? "partial" : "failed";
+            r.message = msg(e);
           }
-          r.status = r.found ? (state.exhausted ? "ok" : "partial") : "empty";
-          r.message = `${r.found} places from neighbouring categories, added because the pool was below ${MIN_POOL}.`;
-        } catch (e) {
-          r.status = r.found ? "partial" : "failed";
-          r.message = msg(e);
+          reports.push(r);
         }
-        reports.push(r);
-      }
-    }
   const short = MIN_POOL - totalAvailable();
   if (health && short > 0)
     reports.push(report({ source: "Plan", scope: "all", status: "partial", message: `Only ${totalAvailable()} leads exist for these segments and areas, ${short} short of ${MIN_POOL}. Add the State or Country tier, or more categories, to reach ${MIN_POOL}.` }));
