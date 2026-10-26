@@ -41,6 +41,18 @@ type Props = {
 };
 const draftChannels: TemplateChannel[] = ["WhatsApp", "Email", "Instagram DM"];
 
+/** One short line: the Overture release with its country and place counts, then any Foursquare countries. */
+const extractSummary = (extracts: { source?: string; country: string; release: string; rows: number }[]) => {
+  const ov = extracts.filter((e) => e.source !== "foursquare");
+  const fsq = extracts.filter((e) => e.source === "foursquare");
+  if (!ov.length && !fsq.length) return "no Overture extracts yet (npm run overture:extract)";
+  const total = (list: typeof ov) => list.reduce((n, e) => n + e.rows, 0).toLocaleString();
+  const parts = [];
+  if (ov.length) parts.push(`Overture ${ov[0].release}: ${ov.length} ${ov.length === 1 ? "country" : "countries"}, ${total(ov)} places`);
+  if (fsq.length) parts.push(`Foursquare ${fsq[0].release}: ${fsq.map((e) => e.country).join(", ")} (${total(fsq)} places)`);
+  return parts.join(" · ");
+};
+
 function BatchDrafts({ deliveries, busy, onPrepare }: { deliveries: Delivery[]; busy: boolean; onPrepare: (d: Delivery, c: TemplateChannel[]) => Promise<unknown> }) {
   const [id, setId] = useState(deliveries[0]?.id ?? "");
   const [channels, setChannels] = useState<TemplateChannel[]>(["WhatsApp"]);
@@ -107,7 +119,7 @@ export function ProjectDetails(props: Props) {
         {health === undefined
           ? "Checking the local sources service…"
           : health
-            ? `Sources service running · ${health.extracts.length ? health.extracts.map((e) => `${e.source === "foursquare" ? "Foursquare " : ""}${e.country} ${e.release} (${e.rows.toLocaleString()} places)`).join(", ") : "no Overture extracts yet (npm run overture:extract)"}`
+            ? `Sources service running · ${extractSummary(health.extracts)}`
             : "Sources service offline: discovery uses OpenStreetMap and Wikidata only. Start it with npm run sources."}
         <button className="text-button" onClick={props.onRefreshHealth}>
           Check again

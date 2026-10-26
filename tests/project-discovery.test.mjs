@@ -109,7 +109,8 @@ test("top-up aims for the 1000-lead floor even for a small batch, then never ref
   c.custom.enrich = false;
   const { deps } = fakeDeps({ rows: 300 });
   const first = await topUp(c, [], deps, { size: 50 });
-  const key = "locality|arch|ov|IN";
+  const key = Object.keys(first.pool).find((k) => k.startsWith("locality|arch|ov|IN|"));
+  assert.ok(key, "the saved progress carries the segment signature");
   // 1000 is wanted, only 300 exist: everything is fetched and the search is exhausted.
   assert.equal(first.pool[key].fetched, 300);
   assert.equal(first.pool[key].exhausted, true);
@@ -192,4 +193,15 @@ test("enrichment: robots.txt, 1 request per second per domain, no private hosts"
   // (the fake clock does not advance, so the reservations stack up: 1 s, then 2 s).
   assert.ok(waits[0] > 0 && waits[0] <= 1000, `first wait ${waits[0]}`);
   assert.ok(Math.abs(waits[1] - waits[0] - 1000) < 200, `slots 1 s apart: ${waits}`);
+});
+
+test("progress saved by an older search definition never blocks a new search", async () => {
+  const c = campaign(["locality"]);
+  c.custom.enrich = false;
+  // The old key format (no signature) is marked exhausted with nothing fetched, as the narrow search left it.
+  c.custom.pool = { "locality|arch|ov|IN": { cursor: "", exhausted: true, fetched: 0 } };
+  const { deps } = fakeDeps({ rows: 5 });
+  const r = await topUp(c, [], deps, { size: 50 });
+  const ov = r.reports.find((x) => x.source === "Overture Maps");
+  assert.deepEqual([ov.status, ov.found], ["ok", 5]);
 });

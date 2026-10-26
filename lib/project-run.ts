@@ -209,6 +209,17 @@ const overtureQuery = (plan: TierPlan, seg: Segment, categories = expandCategori
   excludeAreas: plan.overture!.excludeAreas,
 });
 
+// Saved search progress (cursors, "exhausted") belongs to one definition of a segment. It carries this
+// signature, so changing the categories, keywords or the search rules below starts that search afresh
+// instead of reusing "everything was already fetched" from an older, narrower search.
+const SEARCH_VERSION = 2; // 2: keywords add matches, categories include their sub-categories
+const searchSig = (seg: Segment) => {
+  const text = JSON.stringify([SEARCH_VERSION, [...seg.categories].sort(), [...seg.include].sort(), [...seg.exclude].sort()]);
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = (h * 33) ^ text.charCodeAt(i);
+  return (h >>> 0).toString(36);
+};
+
 /** Whether the service holds an extract of this source for the country (Overture entries may predate the source field). */
 const hasExtract = (health: Health, source: SourceId, country: string) => health.extracts.some((e) => (e.source ?? "overture") === source && e.country === country);
 const SOURCES: { id: SourceId; name: string; key: string; tag: SourceTag }[] = [
@@ -283,7 +294,7 @@ export async function topUp(project: Project, leads: Lead[], deps: RunDeps, opti
       for (const src1 of SOURCES) {
         if (!health || !plan.overture || !seg.categories.length) break;
         if (src1.id === "foursquare" && !hasExtract(health, "foursquare", plan.country.code)) continue;
-        const key = `${plan.tier}|${seg.id}|${src1.key}|${plan.country.code}`;
+        const key = `${plan.tier}|${seg.id}|${src1.key}|${plan.country.code}|${searchSig(seg)}`;
         const state = pool[key] ? { ...pool[key] } : { cursor: "", exhausted: false, fetched: 0 };
         const r = report({ source: src1.name, scope: plan.tier, area: plan.label, segment: seg.label, status: "ok" });
         if (!hasExtract(health, src1.id, plan.country.code)) {
@@ -339,7 +350,7 @@ export async function topUp(project: Project, leads: Lead[], deps: RunDeps, opti
         let failed = 0, searched = 0;
         for (const chunk of chunks) {
           if (need() <= 0) break;
-          const key = `${plan.tier}|${seg.id}|osm|${plan.country.code}|${chunk.id}`;
+          const key = `${plan.tier}|${seg.id}|osm|${plan.country.code}|${chunk.id}|${searchSig(seg)}`;
           if (pool[key]?.exhausted && !options.fetchAll) continue;
           await paceOsm();
           try {
@@ -366,7 +377,7 @@ export async function topUp(project: Project, leads: Lead[], deps: RunDeps, opti
       if (plan.wikidata && src.occupations.length && need() > 0) {
         const countryQid = plan.wikidata.scope === "global" ? plan.country.wikidata : geo.country?.wikidata;
         const r = report({ source: "Wikidata", scope: plan.tier, area: plan.label, segment: seg.label, status: "ok" });
-        const key = `${plan.tier}|${seg.id}|wd|${plan.country.code}`;
+        const key = `${plan.tier}|${seg.id}|wd|${plan.country.code}|${searchSig(seg)}`;
         const state = pool[key] ? { ...pool[key] } : { cursor: "", exhausted: false, fetched: 0 };
         if (!countryQid) {
           r.status = "skipped";
@@ -401,7 +412,7 @@ export async function topUp(project: Project, leads: Lead[], deps: RunDeps, opti
       for (const seg of p.segments)
         for (const src1 of SOURCES) {
           const related = relatedCategories(seg.categories);
-          const key = `${plan.tier}|${seg.id}|${src1.key}+|${plan.country.code}`;
+          const key = `${plan.tier}|${seg.id}|${src1.key}+|${plan.country.code}|${searchSig(seg)}`;
           const state = pool[key] ? { ...pool[key] } : { cursor: "", exhausted: false, fetched: 0 };
           if (!plan.overture || !hasExtract(health, src1.id, plan.country.code) || !related.length || state.exhausted || totalAvailable() >= MIN_POOL) continue;
           deps.onProgress?.({ done: step, total, label: `Related categories · ${seg.label} · ${plan.label}` });
