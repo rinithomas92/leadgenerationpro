@@ -6,7 +6,7 @@ import {
   wellnessTerms,
   type Campaign,
   type Lead,
-} from "./leadgen";
+} from "./leadgen.ts";
 
 // Public business facts checked against the linked business websites on 2026-09-14.
 // These are research snapshots, not claims of buying intent or verified deliverability.
@@ -135,12 +135,16 @@ export function makeLead(c: Campaign, b: Business, sourceLabel: string): Lead {
     history: [
       { at: now(), event: "Real business record added from " + sourceLabel },
     ],
+    kind: "business",
+    checkedAt: "",
+    sourceVerifiedAt: "",
+    scope: "" as const,
   };
   return { ...lead, ...assessFit(lead, c) };
 }
-const categories = [
+export const categories = [
   {
-    match: /caf[eé]|restaurant|coffee/i,
+    match: /caf[eé]|restaurant|coffee|\bchefs?\b/i,
     key: "amenity",
     values: ["cafe", "restaurant"],
     industry: "Cafés and restaurants",
@@ -158,7 +162,7 @@ const categories = [
     industry: "Interior designers",
   },
   {
-    match: /salon|beauty|bridal|hair/i,
+    match: /salon|beauty|bridal|hair|make-?up|nail/i,
     key: "shop",
     values: ["beauty", "hairdresser"],
     industry: "Salons and beauty",

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { customLeadSchema, customProjectSchema, templateSchema } from "./project-schema.ts";
 export const stages = [
   "New",
   "Shortlisted",
@@ -8,9 +9,65 @@ export const stages = [
   "Converted",
   "Lost",
 ] as const;
-export const channels = ["Email", "WhatsApp", "Phone", "Follow-up"] as const;
+// New channels are appended so existing saved drafts and slices keep their meaning.
+export const channels = [
+  "Email",
+  "WhatsApp",
+  "Phone",
+  "Follow-up",
+  "Instagram DM",
+] as const;
+export const audiences = [
+  "General",
+  "Creator Partners",
+  "Professional Prospects",
+] as const;
+export const platforms = [
+  "Instagram",
+  "YouTube",
+  "TikTok",
+  "LinkedIn",
+  "Facebook",
+  "Website",
+] as const;
+// Makeup artists and hairstylists are the PRD launch focus and stay first.
+export const professions = [
+  "Makeup Artist",
+  "Hairstylist",
+  "Nail Artist",
+  "Bridal Makeup Artist",
+  "Beauty Creator",
+  "Model",
+  "Creative Freelancer",
+  "Chef / Hospitality",
+] as const;
+export const partnershipTypes = [
+  "Creator Partner",
+  "Starter Prospect",
+  "Both",
+] as const;
+export const offerModes = ["Proposed", "Confirmed", "Omit"] as const;
 const text = z.string().max(10000);
 const short = z.string().max(300);
+const count = z.number().int().min(0).max(10_000_000_000);
+export const glossSchema = z.object({
+  professions: z
+    .array(z.enum(professions))
+    .max(professions.length)
+    .default(["Makeup Artist", "Hairstylist"]),
+  platforms: z
+    .array(z.enum(platforms))
+    .max(platforms.length)
+    .default(["Instagram"]),
+  followerMin: count.default(0),
+  // 0 means no upper limit.
+  followerMax: count.default(0),
+  keywords: short.default(""),
+  leadLimit: z.number().int().min(1).max(2000).default(500),
+  offerMode: z.enum(offerModes).default("Proposed"),
+  offer: short.default("₹199 Starter plan with 12 months of hosted access"),
+  commission: short.default(""),
+});
 export const marketSchema = z.object({
   name: short.trim().min(1),
   reason: text,
@@ -18,6 +75,23 @@ export const marketSchema = z.object({
   positioning: text,
   search: short,
   score: z.number().min(0).max(100),
+});
+export const scopes = ["locality", "city", "state", "country", "global"] as const;
+export const reportSchema = z.object({
+  source: short,
+  scope: short,
+  area: short.default(""),
+  status: z.enum(["ok", "partial", "empty", "failed", "skipped", "not-configured"]),
+  found: z.number().int().min(0).max(1_000_000),
+  added: z.number().int().min(0).max(1_000_000).default(0),
+  refreshed: z.number().int().min(0).max(1_000_000).default(0),
+  message: text.default(""),
+});
+export const discoverySchema = z.object({
+  // 0 turns automatic refresh off.
+  autoRefreshDays: z.number().int().min(0).max(90).default(0),
+  lastRunAt: short.default(""),
+  lastReport: z.array(reportSchema).max(80).default([]),
 });
 export const campaignSchema = z.object({
   id: short.min(1),
@@ -35,6 +109,28 @@ export const campaignSchema = z.object({
   createdAt: short,
   demo: z.boolean(),
   theme: z.number().int().min(0).max(5),
+  audience: z.enum(audiences).default("General"),
+  gloss: glossSchema.optional(),
+  discovery: discoverySchema.optional(),
+  // Present only on custom lead projects (see project-schema.ts).
+  custom: customProjectSchema.optional(),
+});
+export const creatorSchema = z.object({
+  profession: short.default(""),
+  // Primary contact platform. Website uses the lead's website field.
+  platform: z.enum(platforms).default("Instagram"),
+  // Instagram handle, stored without the leading @.
+  instagram: short.default(""),
+  instagramUrl: short.default(""),
+  tiktokUrl: short.default(""),
+  youtubeUrl: short.default(""),
+  linkedinUrl: short.default(""),
+  facebookUrl: short.default(""),
+  followers: count.nullable().default(null),
+  engagement: short.default(""),
+  partnership: z.enum(partnershipTypes).default("Creator Partner"),
+  photoUrl: short.default(""),
+  verifiedAt: short.default(""),
 });
 export const leadSchema = z.object({
   id: short.min(1),
@@ -58,6 +154,19 @@ export const leadSchema = z.object({
   contactedAt: short,
   demo: z.boolean(),
   history: z.array(z.object({ at: short, event: text })).max(500),
+  kind: z.enum(["business", "creator"]).default("business"),
+  // Creator leads always have this. Business leads may carry the social
+  // links and profession published by their source (for example OpenStreetMap).
+  creator: creatorSchema.optional(),
+  // Date the source last confirmed this record (set on discovery and refresh).
+  checkedAt: short.default(""),
+  // Date the source itself says the record was last verified (e.g. an
+  // OpenStreetMap mapper's check_date). Empty when the source has none.
+  sourceVerifiedAt: short.default(""),
+  // Geographic tier the record was discovered in, used for priority.
+  scope: z.enum(["", ...scopes]).default(""),
+  // Present only on leads of custom lead projects.
+  project: customLeadSchema.optional(),
 });
 export const draftSchema = z.object({
   id: short,
@@ -77,13 +186,19 @@ export const stateSchema = z.object({
     notifications: z.boolean(),
   }),
   campaigns: z.array(campaignSchema).max(200),
-  leads: z.array(leadSchema).max(2000),
+  leads: z.array(leadSchema).max(200_000),
   drafts: z.array(draftSchema).max(2000),
   templates: z
     .array(z.object({ id: short, name: short, subject: short, body: text }))
     .max(100),
+  // Workspace-wide default templates for custom lead projects.
+  customTemplates: z.array(templateSchema).max(40).optional(),
 });
 export type Market = z.infer<typeof marketSchema>;
+export type Gloss = z.infer<typeof glossSchema>;
+export type Creator = z.infer<typeof creatorSchema>;
+export type Scope = (typeof scopes)[number];
+export type DiscoveryReport = z.infer<typeof reportSchema>;
 export type Campaign = z.infer<typeof campaignSchema>;
 export type Lead = z.infer<typeof leadSchema>;
 export type Draft = z.infer<typeof draftSchema>;
@@ -265,7 +380,30 @@ export function assessFit(lead: Lead, campaign: Campaign) {
   };
 }
 export const now = () => new Date().toISOString();
-export function newCampaign(theme = 5, description = ""): Campaign {
+export const glossOffering =
+  "Gloss helps beauty, creative and hospitality professionals turn their experience into a polished resume and a branded enquiry link they can share.";
+export function newCampaign(
+  theme = 5,
+  description = "",
+  audience: Campaign["audience"] = "General",
+): Campaign {
+  if (audience !== "General")
+    return {
+      ...newCampaign(0, description || glossOffering),
+      name:
+        audience === "Creator Partners"
+          ? "Gloss creator partners"
+          : "Gloss professional prospects",
+      // Gloss campaigns keep their leads current with a daily refresh.
+      discovery: discoverySchema.parse({ autoRefreshDays: 1 }),
+      goal:
+        audience === "Creator Partners"
+          ? "Start relevant creator partnership conversations"
+          : "Invite professionals to try Gloss",
+      channels: ["Instagram DM", "Email"],
+      audience,
+      gloss: glossSchema.parse({}),
+    };
   return {
     id: uid(),
     name: theme === 5 ? "" : presets[theme].name,
@@ -282,6 +420,7 @@ export function newCampaign(theme = 5, description = ""): Campaign {
     createdAt: now(),
     demo: false,
     theme,
+    audience: "General",
   };
 }
 export function demoLeads(c: Campaign): Lead[] {
@@ -311,6 +450,10 @@ export function demoLeads(c: Campaign): Lead[] {
         contactedAt: "",
         demo: true,
         history: [{ at: now(), event: "Sample lead added" }],
+        kind: "business" as const,
+        checkedAt: "",
+        sourceVerifiedAt: "",
+        scope: "" as const,
       })),
     );
 }
@@ -400,14 +543,64 @@ export function safeUrl(s: string) {
     return "";
   }
 }
+export function normalizeHandle(raw: string) {
+  let s = raw.trim();
+  const url = safeUrl(s);
+  if (url) {
+    const u = new URL(url);
+    if (!/(^|\.)instagram\.com$/i.test(u.hostname)) return "";
+    s = u.pathname.split("/").filter(Boolean)[0] || "";
+  }
+  s = s.replace(/^@/, "").toLowerCase();
+  return /^[a-z0-9._]{1,30}$/.test(s) && !/^\.|\.$|\.\./.test(s) ? s : "";
+}
+export function profileKey(raw: string) {
+  const url = safeUrl(raw);
+  if (!url) return "";
+  const u = new URL(url);
+  return (
+    u.hostname.replace(/^(www|m)\./, "") + u.pathname.replace(/\/+$/, "")
+  ).toLowerCase();
+}
 export function deduplicate(existing: Lead[], incoming: Lead[]) {
-  const keys = (l: Lead) =>
-    [
-      l.website ? safeUrl(l.website).replace(/\/$/, "").toLowerCase() : "",
-      `${l.name.trim().toLowerCase()}|${l.location.trim().toLowerCase()}`,
-    ]
+  const keys = (l: Lead) => {
+    const c = l.kind === "creator" ? l.creator : undefined;
+    // Creators are matched by public profile, so two different people with
+    // the same name in one city are both kept.
+    const profiles = c
+      ? [
+          normalizeHandle(c.instagram) && "ig:" + normalizeHandle(c.instagram),
+          ...[
+            c.instagramUrl,
+            c.tiktokUrl,
+            c.youtubeUrl,
+            c.linkedinUrl,
+            c.facebookUrl,
+            l.website,
+          ].map(profileKey),
+        ].filter(Boolean)
+      : [];
+    // Directory records (e.g. one OpenStreetMap node per outlet) are matched
+    // only by their source record, so branches that share a brand website or
+    // name are all kept.
+    const directory = !c && /openstreetmap\.org\/(node|way|relation)\//.test(l.source);
+    return (
+      profiles.length
+        ? profiles
+        : directory
+          ? []
+          : [
+              l.website
+                ? safeUrl(l.website).replace(/\/$/, "").toLowerCase()
+                : "",
+              `${l.name.trim().toLowerCase()}|${l.location.trim().toLowerCase()}`,
+            ]
+    )
+      // The same source record (e.g. one OpenStreetMap node) is never added twice.
+      .concat(safeUrl(l.source) ? ["src:" + profileKey(l.source)] : [])
       .filter(Boolean)
       .map((key) => `${l.campaignId}|${key}`);
+  };
   const seen = new Set(existing.flatMap(keys));
   const result: Lead[] = [];
   for (const l of incoming) {

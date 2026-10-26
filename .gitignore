@@ -50,3 +50,9 @@ next-env.d.ts
 *.tsbuildinfo
 /test-results/
 /playwright-report/
+
+# Generated lead workbooks contain contact details; keep them out of Git.
+/exports/
+
+# Overture Maps extracts (large, re-downloadable with npm run overture:extract).
+/data/

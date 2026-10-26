@@ -1,90 +1,69 @@
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { sameOrigin } from "@/lib/server-store";
-import { campaignSchema, deduplicate } from "@/lib/leadgen";
-import {
-  buildDirectoryQuery,
-  directoryLeads,
-  researchLeads,
-  type DirectoryElement,
-} from "@/lib/discovery";
+import { campaignSchema, reportSchema, scopes } from "@/lib/leadgen";
+import { plan } from "@/lib/discovery-engine";
+import { loadRegions, resolveGeo, runStep } from "@/lib/discovery-net";
 import { z } from "zod";
+
+const place = z.object({
+  name: z.string().max(200),
+  areaId: z.number().int().optional(),
+  wikidata: z.string().regex(/^Q\d+$/).optional(),
+  lat: z.number().min(-90).max(90).optional(),
+  lon: z.number().min(-180).max(180).optional(),
+  code: z.string().max(10).optional(),
+});
+const geoSchema = z.object({
+  input: z.string().max(300),
+  locality: place.optional(),
+  city: place.optional(),
+  state: place.optional(),
+  country: place.optional(),
+  regions: z.array(z.object({ name: z.string().max(200), areaId: z.number().int() })).max(80).optional(),
+});
+const requestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("plan"), campaign: campaignSchema }),
+  z.object({ action: z.literal("regions"), geo: geoSchema }),
+  z.object({
+    action: z.literal("step"),
+    campaign: campaignSchema,
+    geo: geoSchema,
+    step: z.object({
+      source: z.enum(["osm", "wikidata", "research"]),
+      scope: z.enum(scopes),
+      region: z.object({ name: z.string().max(200), areaId: z.number().int() }).optional(),
+      cursor: z.number().int().nonnegative().optional(),
+    }),
+  }),
+]);
+const json = (data: unknown, status = 200) =>
+  Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
+
 export async function POST(req: Request) {
-  if (!(await getChatGPTUser()))
-    return Response.json({ error: "Sign in required." }, { status: 401 });
-  if (!sameOrigin(req))
-    return Response.json({ error: "Invalid request origin." }, { status: 403 });
+  if (!(await getChatGPTUser())) return json({ error: "Sign in required." }, 401);
+  if (!sameOrigin(req)) return json({ error: "Invalid request origin." }, 403);
   try {
     const raw = await req.text();
-    if (raw.length > 30000)
-      return Response.json(
-        { error: "Campaign is too large." },
-        { status: 413 },
-      );
-    const parsed = z
-      .object({
-        campaign: campaignSchema,
-        mode: z.enum(["research", "directory"]).default("directory"),
-      })
-      .safeParse(JSON.parse(raw));
-    if (!parsed.success)
-      return Response.json(
-        { error: "Select a valid campaign." },
-        { status: 400 },
-      );
-    const { campaign, mode } = parsed.data;
-    const researched = researchLeads(campaign);
-    if (mode === "research")
-      return Response.json({
-        leads: researched,
-        mode: "research",
-        message:
-          "Business website research snapshot, checked 14 Sep 2026. Coverage: Pune hotels, interior designers and mental-wellness organisations.",
+    if (raw.length > 40000) return json({ error: "Campaign is too large." }, 413);
+    const parsed = requestSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) return json({ error: "Select a valid campaign." }, 400);
+    const body = parsed.data;
+    if (body.action === "plan") {
+      const resolved = await resolveGeo(body.campaign.location);
+      const { steps, skipped } = plan(body.campaign, resolved.geo);
+      return json({
+        geo: resolved.geo,
+        steps,
+        skipped: z.array(reportSchema).parse(skipped),
+        report: resolved.report,
       });
-    const { query } = buildDirectoryQuery(campaign);
-    try {
-      const response = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": "LeadGenPro/1.0 (user-initiated business discovery)",
-        },
-        body: new URLSearchParams({ data: query }),
-        signal: AbortSignal.timeout(25000),
-      });
-      if (!response.ok) throw new Error("Directory temporarily unavailable");
-      const result = (await response.json()) as {
-        elements?: DirectoryElement[];
-        remark?: string;
-      };
-      if (!Array.isArray(result.elements) || result.remark)
-        throw new Error("Directory query incomplete");
-      const live = directoryLeads(campaign, result.elements);
-      return Response.json({
-        leads: [...researched, ...deduplicate(researched, live)],
-        mode: "directory",
-        message:
-          "Real public listings. City-boundary search; service radius is not applied. Contact coverage varies. Directory entries may be outdated; review the source before outreach.",
-      });
-    } catch {
-      if (researched.length)
-        return Response.json({
-          leads: researched,
-          mode: "research",
-          message:
-            "Live directory is temporarily unavailable. Showing real businesses from the source-linked research snapshot checked 14 Sep 2026.",
-        });
-      return Response.json(
-        {
-          error:
-            "The public directory is temporarily unavailable. No sample leads were substituted. Try again later or import a CSV.",
-        },
-        { status: 503 },
-      );
     }
+    if (body.action === "regions") return json({ regions: await loadRegions(body.geo) });
+    const result = await runStep(body.campaign, body.geo, body.step);
+    return json(result);
   } catch (e) {
-    return Response.json(
-      { error: e instanceof Error ? e.message : "Discovery failed." },
-      { status: 400 },
-    );
+    if (e instanceof SyntaxError) return json({ error: "Invalid JSON request." }, 400);
+    // Location resolution failures are reported to the user, never hidden.
+    return json({ error: e instanceof Error ? e.message : "Discovery failed." }, 502);
   }
 }

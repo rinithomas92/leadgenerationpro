@@ -7,6 +7,9 @@ import {
   CalendarClock,
   Target,
   FileText,
+  Sparkles,
+  Users,
+  FolderSearch,
 } from "lucide-react";
 import {
   getFollowUps,
@@ -19,14 +22,18 @@ import { Mark, Stats, formatDate } from "./ui";
 
 type Props = {
   state: Workspace;
-  start: (theme?: number, description?: string) => void;
+  startProject: () => void;
+  start: (
+    theme?: number,
+    description?: string,
+    audience?: Campaign["audience"],
+  ) => void;
   go: (page: string) => void;
   open: (campaign: Campaign) => void;
-  sample: () => void;
   busy: boolean;
 };
 
-export function Dashboard({ state, start, go, open, sample, busy }: Props) {
+export function Dashboard({ state, start, startProject, go, open }: Props) {
   const [description, setDescription] = useState("");
   const followUps = getFollowUps(state);
   const active = state.campaigns.filter(
@@ -137,6 +144,50 @@ export function Dashboard({ state, start, go, open, sample, busy }: Props) {
           <button className="primary">Find my market</button>
         </form>
       </section>
+      <section className="panel gloss-start">
+        <div>
+          <span className="eyebrow">LEAD PROJECTS</span>
+          <h2>Leads for any kind of business.</h2>
+          <p className="muted">
+            Describe your business, list the kinds of leads you want, pick a
+            location and reach, and get batches of real leads from open public
+            data, split across tiers.
+          </p>
+        </div>
+        <div className="button-row">
+          <button className="primary" onClick={startProject}>
+            <FolderSearch size={16} /> New lead project
+          </button>
+          <button className="secondary" onClick={() => go("Lead Projects")}>
+            All lead projects
+          </button>
+        </div>
+      </section>
+      <section className="panel gloss-start">
+        <div>
+          <span className="eyebrow">GLOSS CREATOR OUTREACH</span>
+          <h2>Find creators and professionals for Gloss.</h2>
+          <p className="muted">
+            Build Instagram-first lists from public profiles you check
+            yourself. Creator partners and Starter prospects stay in separate
+            campaigns, and every message is a draft you send.
+          </p>
+        </div>
+        <div className="button-row">
+          <button
+            className="primary"
+            onClick={() => start(0, "", "Creator Partners")}
+          >
+            <Sparkles size={16} /> Creator partners
+          </button>
+          <button
+            className="secondary"
+            onClick={() => start(0, "", "Professional Prospects")}
+          >
+            <Users size={16} /> Professional prospects
+          </button>
+        </div>
+      </section>
       <div className="section-title">
         <div>
           <h2>Campaign templates</h2>
@@ -144,11 +195,6 @@ export function Dashboard({ state, start, go, open, sample, busy }: Props) {
             Start with a business you know, then refine your audience.
           </p>
         </div>
-        {!state.campaigns.length && (
-          <button className="text-button" disabled={busy} onClick={sample}>
-            Explore sample data
-          </button>
-        )}
       </div>
       <div className="template-grid">
         {presets.map((p, i) => (

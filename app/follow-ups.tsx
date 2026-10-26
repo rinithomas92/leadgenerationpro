@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CalendarClock, Check } from "lucide-react";
 import { getFollowUps, type Lead, type Workspace } from "@/lib/leadgen";
+import { followUpLabel } from "@/lib/outcomes";
 import { Blank, Choice, formatDate } from "./ui";
 
 type Props = {
@@ -10,9 +11,15 @@ type Props = {
   save: (state: Workspace, message?: string) => Promise<boolean>;
   busy: boolean;
   outreach: (lead: Lead) => void;
+  // Custom lead projects: open the lead's project, and No-response suggestions.
+  projectTools?: {
+    open: (lead: Lead) => void;
+    noResponse: Lead[];
+    markNoResponse: (leads: Lead[]) => Promise<unknown>;
+  };
 };
 
-export function FollowUps({ state, save, busy, outreach }: Props) {
+export function FollowUps({ state, save, busy, outreach, projectTools }: Props) {
   const [filter, setFilter] = useState("All reminders");
   const reminders = getFollowUps(state);
   const visible = reminders.filter(
@@ -66,7 +73,7 @@ export function FollowUps({ state, save, busy, outreach }: Props) {
                   </span>
                   <h3>{item.lead.name}</h3>
                   <p className="muted">
-                    {item.label} ·{" "}
+                    {followUpLabel(item.lead) || item.label} ·{" "}
                     {
                       state.campaigns.find((c) => c.id === item.lead.campaignId)
                         ?.name
@@ -76,7 +83,7 @@ export function FollowUps({ state, save, busy, outreach }: Props) {
                 <div className="button-row">
                   <button
                     className="secondary"
-                    onClick={() => outreach(item.lead)}
+                    onClick={() => (item.lead.project && projectTools ? projectTools.open(item.lead) : outreach(item.lead))}
                   >
                     Draft follow-up
                   </button>
@@ -114,6 +121,42 @@ export function FollowUps({ state, save, busy, outreach }: Props) {
           </div>
         )}
       </section>
+      {projectTools && projectTools.noResponse.length > 0 && (
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>Suggested: No response</h2>
+              <p className="muted">
+                Contacted lead-project leads with no reply and no further contact for the
+                project&apos;s waiting period after their last follow-up. Nothing changes until you choose.
+              </p>
+            </div>
+            <button className="secondary" disabled={busy} onClick={() => projectTools.markNoResponse(projectTools.noResponse)}>
+              Mark all {projectTools.noResponse.length} as No response
+            </button>
+          </div>
+          <div className="reminder-list">
+            {projectTools.noResponse.map((l) => (
+              <article className="reminder-item" key={l.id}>
+                <div>
+                  <h3>{l.name}</h3>
+                  <p className="muted">
+                    Last contacted {formatDate(l.project!.outreach.lastContactedAt)} · {state.campaigns.find((c) => c.id === l.campaignId)?.name}
+                  </p>
+                </div>
+                <div className="button-row">
+                  <button className="secondary" disabled={busy} onClick={() => projectTools.markNoResponse([l])}>
+                    Mark No response
+                  </button>
+                  <button className="text-button" onClick={() => projectTools.open(l)}>
+                    Open
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
     </>
   );
 }
