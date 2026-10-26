@@ -53,7 +53,8 @@ export default defineConfig(async () => {
   return {
     server: {
       ...(managedLinux ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] } : {}),
-      ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
+      // Extracts under data/ are huge and rewritten by long downloads; watching them crashes the dev server (EBUSY).
+      watch: { ignored: ["**/data/**", "**/*.log"], ...(isCodexSeatbeltSandbox ? { useFsEvents: false, usePolling: true } : {}) },
     },
     plugins: [
       vinext(),

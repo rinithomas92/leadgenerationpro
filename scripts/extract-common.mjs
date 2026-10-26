@@ -3,6 +3,7 @@
 // then turns each country into one location-sorted file the sources service
 // searches, recording it in the manifest as soon as it is ready.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
 
 const fwd = (p) => p.replace(/\\/g, "/");
@@ -24,14 +25,52 @@ export function recordCountry(dataDir, release, cc, file, rows) {
  * code) to a staging folder partitioned by cc, then compacts each country into
  * <dataDir>/<release>/<CC>.parquet sorted by location.
  */
-export async function extractAllCountries(c, { dataDir, release, selectSql, log = console.log }) {
+/** Removes what an interrupted part left behind (its files are named p<idx>_*), so a retry starts clean. */
+function dropPart(staging, idx) {
+  for (const d of readdirSync(staging)) {
+    const sub = path.join(staging, d);
+    if (!d.startsWith("cc=")) continue;
+    for (const f of readdirSync(sub)) if (f.startsWith(`p${idx}_`)) rmSync(path.join(sub, f), { force: true });
+  }
+}
+/**
+ * `parts` ({ files, partSql(file) }) downloads one source file at a time, retrying network failures with
+ * growing waits and recording progress, so an interrupted run resumes where it stopped instead of restarting.
+ * Without `parts`, `selectSql` is downloaded in one pass.
+ */
+export async function extractAllCountries(c, { dataDir, release, selectSql, parts, log = console.log }) {
   const dir = path.join(dataDir, release);
   const staging = path.join(dir, "_staging");
-  rmSync(staging, { recursive: true, force: true });
+  const progressFile = path.join(staging, "progress.json");
+  const resumable = parts && existsSync(progressFile);
+  if (!resumable) rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });
   const started = Date.now();
-  log("Downloading every country in one pass (this takes a while; nothing is written to the final files until it ends)…");
-  await c.run(`COPY (${selectSql}) TO '${fwd(staging)}' (FORMAT parquet, COMPRESSION zstd, PARTITION_BY (cc), OVERWRITE_OR_IGNORE)`);
+  if (parts) {
+    const done = new Set(resumable ? JSON.parse(readFileSync(progressFile, "utf8")).done : []);
+    log(`Downloading ${parts.files.length} source files one at a time${done.size ? ` (${done.size} already done, resuming)` : ""}…`);
+    for (const [idx, file] of parts.files.entries()) {
+      if (done.has(idx)) continue;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          dropPart(staging, idx);
+          await c.run(`COPY (${parts.partSql(file)}) TO '${fwd(staging)}' (FORMAT parquet, COMPRESSION zstd, PARTITION_BY (cc), OVERWRITE_OR_IGNORE, FILENAME_PATTERN 'p${idx}_{i}')`);
+          break;
+        } catch (e) {
+          if (attempt >= 10) throw e;
+          const wait = Math.min(300, 15 * attempt);
+          log(`File ${idx + 1}/${parts.files.length} failed (${String(e.message || e).split("\n")[0].slice(0, 120)}); retrying in ${wait} s (attempt ${attempt}/10).`);
+          await sleep(wait * 1000);
+        }
+      }
+      done.add(idx);
+      writeFileSync(progressFile, JSON.stringify({ done: [...done] }));
+      log(`File ${idx + 1}/${parts.files.length} done · ${Math.round((Date.now() - started) / 60000)} min elapsed.`);
+    }
+  } else {
+    log("Downloading every country in one pass (this takes a while; nothing is written to the final files until it ends)…");
+    await c.run(`COPY (${selectSql}) TO '${fwd(staging)}' (FORMAT parquet, COMPRESSION zstd, PARTITION_BY (cc), OVERWRITE_OR_IGNORE)`);
+  }
   log(`Download finished in ${Math.round((Date.now() - started) / 60000)} min. Sorting each country…`);
   const done = [];
   for (const d of readdirSync(staging).sort()) {

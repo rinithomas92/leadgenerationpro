@@ -45,10 +45,11 @@ export async function extract(countries, release, log = console.log) {
   const c = await db.connect();
   await c.run("INSTALL httpfs; LOAD httpfs; SET s3_region = 'us-west-2';");
   if (countries === "all") {
-    const selectSql = `SELECT addresses[1].country AS cc, id, names, basic_category, taxonomy, confidence, operating_status, addresses, phones, emails, websites, socials, brand, sources, bbox
-      FROM read_parquet('${bucket}/${release}/theme=places/type=place/*', hive_partitioning=1)
-      WHERE regexp_matches(coalesce(addresses[1].country, ''), '^[A-Z]{2}$')`;
-    return extractAllCountries(c, { dataDir, release, selectSql, log });
+    const glob = `${bucket}/${release}/theme=places/type=place/*`;
+    const files = (await c.runAndReadAll(`SELECT file FROM glob('${glob}') ORDER BY file`)).getRowObjectsJson().map((r) => r.file);
+    const partSql = (file) => `SELECT addresses[1].country AS cc, id, names, basic_category, taxonomy, confidence, operating_status, addresses, phones, emails, websites, socials, brand, sources, bbox
+      FROM read_parquet('${file.replace(/'/g, "''")}') WHERE regexp_matches(coalesce(addresses[1].country, ''), '^[A-Z]{2}$')`;
+    return extractAllCountries(c, { dataDir, release, parts: { files, partSql }, log });
   }
   for (const cc of countries) {
     if (!/^[A-Z]{2}$/.test(cc)) throw new Error(`Not an ISO country code: ${cc}`);
