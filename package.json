@@ -19,6 +19,7 @@
     "sources": "node --experimental-strip-types sources/server.ts",
     "overture:extract": "node scripts/overture-extract.mjs",
     "fsq:extract": "node --experimental-strip-types scripts/fsq-extract.mjs",
+    "fsq:remap": "node --experimental-strip-types scripts/fsq-remap.mjs",
     "overture:taxonomy": "node scripts/overture-reference.mjs"
   },
   "dependencies": {
