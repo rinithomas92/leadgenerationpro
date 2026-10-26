@@ -90,6 +90,10 @@ export function reshapeSql(placesSql, labelMap, { order = true } = {}) {
   ${order ? "ORDER BY round(latitude, 1), round(longitude, 1), fsq_place_id" : ""}`;
 }
 
+/** Every country at once: the reshaped rows plus a `cc` column to partition by. */
+export const allCountriesSql = (placesSql, labelMap) =>
+  `SELECT addresses[1].country AS cc, * FROM (${reshapeSql(placesSql, labelMap, { order: false })}) WHERE regexp_matches(coalesce(addresses[1].country, ''), '^[A-Z]{2}$')`;
+
 export async function extract(countries, release, token, log = console.log) {
   const db = await DuckDBInstance.create(":memory:");
   const c = await db.connect();
@@ -102,9 +106,9 @@ export async function extract(countries, release, token, log = console.log) {
   const labelMap = `MAP {${uniq.map((l) => `${sqlStr(l)}: ${sqlStr(mapLabel(l))}`).join(", ")}}`;
   log(`${uniq.length} category labels, ${uniq.filter((l) => known.has(mapLabel(l))).length} matched to Overture categories.`);
   if (countries === "all") {
-    const raw = `SELECT * FROM read_parquet('${base}/places/parquet/*.parquet')`;
-    const selectSql = `SELECT upper(country) AS cc, * FROM (${reshapeSql(raw, labelMap, { order: false })}) WHERE regexp_matches(upper(country), '^[A-Z]{2}$')`;
-    return extractAllCountries(c, { dataDir, release, selectSql, log });
+    const files = (await c.runAndReadAll(`SELECT file FROM glob('${base}/places/parquet/*.parquet') ORDER BY file`)).getRowObjectsJson().map((r) => r.file);
+    const partSql = (file) => allCountriesSql(`SELECT * FROM read_parquet('${file.replace(/'/g, "''")}')`, labelMap);
+    return extractAllCountries(c, { dataDir, release, parts: { files, partSql }, log });
   }
   for (const cc of countries) {
     if (!/^[A-Z]{2}$/.test(cc)) throw new Error(`Not an ISO country code: ${cc}`);

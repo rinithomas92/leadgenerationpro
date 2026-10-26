@@ -3,7 +3,7 @@
 // column names is written by DuckDB in a temporary folder; no network is used.
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
@@ -83,4 +83,42 @@ test("a Foursquare place becomes a lead credited to Foursquare under its own rec
   const lead = overtureLead(campaign, r.rows[0], { tier: "city", segmentId: "s1" }, r.release, { name: "Foursquare Open Source Places", prefix: "fsq", licence: "Apache-2.0" });
   assert.equal(lead.project.sourceIds[0], "fsq:f1");
   assert.match(lead.sourceLabel, /Foursquare Open Source Places .*Apache-2\.0/);
+});
+
+test("the all-countries extract splits places by country, sorts each file, and resumes after a failure", async () => {
+  const { allCountriesSql } = await import("../scripts/fsq-extract.mjs");
+  const { extractAllCountries } = await import("../scripts/extract-common.mjs");
+  const out = mkdtempSync(path.join(tmpdir(), "leadgen-all-"));
+  try {
+    const c = await (await DuckDBInstance.create(":memory:")).connect();
+    const map = `MAP {'Business and Professional Services > Beauty Salon': 'beauty_salon'}`;
+    const raw = (rows) => rows.map(rowSql).join("\nUNION ALL\n");
+    const rows = [
+      { id: "i1", name: "Mumbai Salon", lat: 19.07, lon: 72.87, tel: "+912212345678", labels: ["Business and Professional Services > Beauty Salon"] },
+      { id: "u1", name: "NYC Salon", lat: 40.7, lon: -74, tel: "+12125550100", labels: ["Business and Professional Services > Beauty Salon"] },
+    ];
+    // rowSql is India-only; the second row is rewritten to the US below.
+    const us = `SELECT * REPLACE ('US' AS country) FROM (${raw([rows[1]])})`;
+    const logs = [];
+    const files = ["a", "b"];
+    let failOnce = true;
+    const parts = {
+      files,
+      partSql: (f) => {
+        if (f === "b" && failOnce) {
+          failOnce = false;
+          return "SELECT * FROM read_parquet('/no/such/file.parquet')";
+        }
+        return allCountriesSql(f === "a" ? raw([rows[0]]) : us, map);
+      },
+    };
+    const done = await extractAllCountries(c, { dataDir: out, release: "r1", parts, log: (m) => logs.push(m) });
+    assert.deepEqual(done.map(([cc, n]) => [cc, n]).sort(), [["IN", 1], ["US", 1]]);
+    assert.ok(logs.some((l) => /retrying/.test(l)), "the failed file was retried");
+    const m = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8"));
+    assert.deepEqual(Object.keys(m.releases.r1).sort(), ["IN", "US"]);
+    assert.equal(existsSync(path.join(out, "r1", "_staging")), false, "staging is cleaned up");
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 });
