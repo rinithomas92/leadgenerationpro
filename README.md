@@ -173,19 +173,25 @@ The Overture Places theme contains no OpenStreetMap data, so ODbL applies to Ope
 - **Do-not-contact list:** checked during discovery and delivery (see below).
 - **Every search is reported:** failures appear in the source report and are never hidden.
 
-### The sources service and Overture extracts
+### The sources service and place data (not included in the repository)
 
-Overture data is queried locally with DuckDB through a small service bound to `127.0.0.1:5188`. Without it, lead projects still work with OpenStreetMap and Wikidata only, and the project page says so.
+**The place data is not in Git.** `data/` is ignored, because the data runs to several GB and GitHub rejects files over 100 MB. After cloning, each person downloads it once on their own computer, as below. Until they do, lead projects still work with OpenStreetMap and Wikidata only, which finds far fewer leads, and the project page says so.
+
+Overture data is queried locally with DuckDB through a small service bound to `127.0.0.1:5188`.
 
 ```sh
-npm run overture:extract            # India, latest monthly release (about 500 MB; 20–30 minutes)
-npm run overture:extract -- AE GB   # countries chosen for the Global tier
-npm run sources                     # start the service; keep it running while you use the app
+npm install
+npm run overture:extract                # India only: about 470 MB, 20–30 minutes
+npm run overture:extract -- AE GB       # specific countries, for the Global tier
+npm run overture:extract -- --all       # every country: about 9 GB, around 5–6 hours
+npm run sources                         # start the service; keep it running while you use the app
 ```
 
-- Extracts are saved to `data/overture/<release>/<country>.parquet`, which Git ignores. Re-run the command, or press **Update** under **Data quality** on a project, to move to Overture's newest monthly release.
+- **Worldwide download (`--all`):** it reads Overture's 16 source files one at a time and keeps its progress in `data/overture/<release>/_staging`. If it stops (network drop, sleep, closed terminal), run the same command again and it resumes where it stopped. If it keeps failing on "Could not resolve hostname" while your internet works, stop it and run it again: a fresh process resumes from the saved progress. Keep the computer awake while it runs, and have about 20 GB of free disk during the download (the staging copy is removed at the end). Each country is usable as soon as it has been sorted into its own file, and the last step (sorting each country by location so searches are fast) takes one to two hours.
+- **Where it is saved:** `data/overture/<release>/<country>.parquet`, which Git ignores. Re-run the command, or press **Update** under **Data quality** on a project, to move to Overture's newest monthly release. Overture publishes monthly and the places themselves can be older than the release, so check leads before sending (the Data quality checks and each lead's source date help).
 - `npm run overture:taxonomy` regenerates the category list and country list from a release.
-- Optional second source, Foursquare Open Source Places (Apache-2.0): it is gated on Hugging Face, so sign in at <https://huggingface.co/datasets/foursquare/fsq-os-places>, accept the terms and create a read token. Then `$env:HF_TOKEN = "hf_..."` (bash: `export HF_TOKEN=hf_...`) and `npm run fsq:extract` (or `-- AE GB`). The extract is reshaped into the Overture layout in `data/foursquare/` (Git-ignored); restart `npm run sources` and discovery searches it alongside Overture. Places found by both merge into one lead.
+- Optional second source, Foursquare Open Source Places (Apache-2.0): it is gated on Hugging Face, so sign in at <https://huggingface.co/datasets/foursquare/fsq-os-places>, accept the terms and create a read token. Put the token on its own line as `HF_TOKEN=hf_...` in `.env.local` (Git-ignored), or set it in your shell (`$env:HF_TOKEN = "hf_..."` on PowerShell), then run `npm run fsq:extract` (India only takes about an hour) or `-- AE GB` for other countries. The extract is reshaped into the Overture layout in `data/foursquare/` (Git-ignored); restart `npm run sources` and discovery searches it alongside Overture. Places found by both merge into one lead.
+- Foursquare worldwide is possible with `npm run fsq:extract -- --all`, but it is slow (many hours) and Overture already covers most places, so India only is the recommended setup. If the category matching improves later, `npm run fsq:remap` re-maps an existing extract without downloading again.
 - The service answers only the app's own origins (`http://127.0.0.1:5187`, `http://localhost:5187`). Add more with `LEADGEN_ORIGINS=http://127.0.0.1:5190`.
 - Email checks use DNS MX lookups. If your system's DNS refuses them, the service falls back to public resolvers (1.1.1.1, 9.9.9.9). Set `LEADGEN_DNS=192.168.0.1` to choose your own.
 
