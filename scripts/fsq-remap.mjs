@@ -37,10 +37,12 @@ export async function remap(countries, log = console.log) {
     if (!map.size) continue;
     const lookup = `MAP {${[...map].map(([k, v]) => `${sqlStr(k)}: ${sqlStr(v)}`).join(", ")}}`;
     const p = `coalesce(${lookup}[taxonomy.primary], taxonomy.primary)`;
+    // Re-mapped alternates keep their order; duplicates are dropped by position, not by list_distinct.
+    const alts = `list_transform(coalesce(taxonomy.alternates, []::VARCHAR[]), a -> coalesce(${lookup}[a], a))`;
     const tmp = file + ".tmp";
     rmSync(tmp, { force: true });
     await c.run(
-      `COPY (SELECT * REPLACE ({'primary': ${p}, 'hierarchy': [${p}], 'alternates': list_filter(list_distinct(list_transform(coalesce(taxonomy.alternates, []::VARCHAR[]), a -> coalesce(${lookup}[a], a))), a -> a IS DISTINCT FROM ${p})} AS taxonomy) FROM ${src})
+      `COPY (SELECT * REPLACE ({'primary': ${p}, 'hierarchy': [${p}], 'alternates': list_filter(${alts}, (a, i) -> a IS DISTINCT FROM ${p} AND list_position(${alts}, a) = i)} AS taxonomy) FROM ${src})
        TO '${fwd(tmp)}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 100000)`,
     );
     renameSync(tmp, file);

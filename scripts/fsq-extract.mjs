@@ -65,7 +65,9 @@ export async function latestRelease(token, f = fetch) {
 }
 /** SELECT that turns raw Foursquare place columns into the Overture-shaped row. `labelMap` is a DuckDB MAP literal. */
 export function reshapeSql(placesSql, labelMap, { order = true } = {}) {
-  const cats = `list_distinct(list_filter(list_transform(coalesce(fsq_category_labels, []::VARCHAR[]), l -> ${labelMap}[trim(l)]), x -> x IS NOT NULL))`;
+  // Distinct but in label order (list_distinct does not promise an order, and the first label is the place's main category).
+  const mapped = `list_filter(list_transform(coalesce(fsq_category_labels, []::VARCHAR[]), l -> ${labelMap}[trim(l)]), x -> x IS NOT NULL)`;
+  const cats = `list_filter(${mapped}, (x, i) -> list_position(${mapped}, x) = i)`;
   return `SELECT
     fsq_place_id AS id,
     {'primary': name} AS names,
