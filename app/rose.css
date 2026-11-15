@@ -1,0 +1,60 @@
+/* Pink & white finish. Semantic success/error colours retain their meaning. */
+:root,.dark {
+  --background:#ffffff;
+  --foreground:#452b37;
+  --primary:#ad305e;
+  --primary-foreground:#ffffff;
+  --secondary:#fff3f7;
+  --secondary-foreground:#743950;
+  --muted:#fff5f8;
+  --muted-foreground:#7d616d;
+  --accent:#fce7ef;
+  --accent-foreground:#923052;
+  --border:#f0dce4;
+  --input:#e6c9d4;
+  --ring:#b83465;
+  --gold:#a24e6e;
+  --sidebar:#fff8fb;
+  --sidebar-foreground:#653548;
+  --sidebar-primary:#ad305e;
+  --sidebar-accent:#fce7ef;
+  --sidebar-border:#efd9e3;
+  --chart-1:#ad305e;
+  --chart-2:#db7099;
+  --chart-3:#9a527f;
+  --chart-4:#c78a9e;
+  --chart-5:#806184;
+}
+body,.workspace{color:var(--foreground);background:#fff}
+.workspace{background:radial-gradient(ellipse at 100% 0,#ffedf480,transparent 45%),#fff}
+.brand-sidebar [data-slot="sidebar-inner"]{background:linear-gradient(155deg,#fff,#fff1f7);color:#653548;border-right:1px solid #efd9e3}
+.brand-sidebar .brand{color:#623045}
+.brand-sidebar .brand svg,.brand-sidebar .brand em{color:#b33365;filter:none}
+.brand-sidebar .signature{color:#9a5a74}
+.brand-sidebar .nav-caption{color:#926578}
+.brand-sidebar .nav-item{color:#795465}
+.brand-sidebar .nav-item:hover{color:#992c57;background:#fceaf1}
+.brand-sidebar .nav-item.active{color:#95294e;background:linear-gradient(115deg,#f9dce8,#fcedf3);border-color:#f0cfdd;box-shadow:inset 2px 0 #c34d7c,0 5px 12px #98385908}
+.brand-sidebar .sidebar-note{border-color:#efd9e3}
+.brand-sidebar .sidebar-note>svg,.brand-sidebar .sidebar-note>p em{color:#b64a76}
+.brand-sidebar .sidebar-note>p{color:#73485b}
+.brand-sidebar .sidebar-note small,.brand-sidebar .profile small{color:#886576}
+.brand-sidebar .profile{color:#673c50;border-color:#efd9e3}
+.brand-sidebar .avatar{background:#f8dce8;color:#9b345b;border-color:#edc3d4}
+.primary,.workspace .places-module button.places-primary{background:linear-gradient(140deg,#bf4275,#9f2855);border-color:#a72c59;box-shadow:0 2px 0 #ffffff26 inset,0 5px 0 -3px #76203f,0 7px 16px #a32e5820}
+.primary:hover,.workspace .places-module button.places-primary:hover{background:linear-gradient(140deg,#cc5083,#ad305e)}
+.secondary,.text-button,.contact-list a{color:#9d325d}
+.secondary{background:#fff;border-color:#e9cbd8}.secondary:hover{background:#fff2f7;border-color:#d9a2b9}
+.finder input,.input,.choice,.data-table td{color:#593749}
+.data-table th,.pipeline-column{background:#fff7fa;color:#80566a}
+.data-table tr:hover,.action-row:hover{background:#fff3f8}
+.builder-aside{background:linear-gradient(135deg,#fff0f6,#fff9fb);border-color:#efd4e0}
+.builder-aside h2{color:#73354f}.builder-aside p{color:#83586c}
+.creator-hero{background:#fff0f6}.creator-avatar{background:#fce4ee;color:#a04469;border-color:#efc8d9}
+.workspace .places-module .places-check input,.workspace .places-module progress{accent-color:#ad305e}
+.workspace .places-tabs button[aria-current]{background:#a83260;color:#fff}
+.status-ok{background:#eaf3e7;color:#315f36}
+.status-partial,.status-not-configured{background:#faf1de;color:#78571e}
+.status-failed{background:#fceeea;color:#9c372a}
+.status-empty,.status-skipped{background:#f0f2ec;color:#606b5a}
+.warning-note,.service-status.off,.report-status.status-partial,.report-status.status-not-configured{color:#78571e}

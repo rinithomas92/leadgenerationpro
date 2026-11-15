@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./product.css";
 import "./premium.css";
+import "./luxe.css";
+import "./atelier.css";
+import "./rose.css";
 
 export const metadata: Metadata = {
   title: "LeadGen Pro by Rini",

@@ -410,3 +410,74 @@ The sources service and Overture extracts run on your own computer; a hosted cop
 - **Wikidata:** CC0.
 
 Public listings can be outdated, so check details before outreach.
+
+## Places Discovery
+
+Open **Places Discovery**, immediately below **Campaigns**, or `/#places-discovery`.
+This implements the BRD's session-bound pilot in the existing React/Worker/D1 stack.
+It does not send outreach or change existing campaign discovery.
+
+1. Select a category, source and geographic centre. Area lookup returns exact-name candidates; explicitly choose the intended locality, city or state. The initial centre is Pune, with a 3 km radius. OpenStreetMap also supports resolved administrative boundaries. Google uses a location bias; Apple uses centre-based relevance, not a hard radius.
+2. Run discovery. A saved run records progress, limits and cancellation. OpenStreetMap returns up to 100 listings; Google returns one page (up to 20); Apple returns the provider's search response. Totals are returned listings, never market size. Broad institution categories need researcher qualification.
+3. Review directory evidence or add independent business contact evidence. Each field has a URL, checked date and quality status. Missing data stays blank. The module does not guess email addresses, crawl websites, infer consent or classify numbers as WhatsApp accounts.
+4. Select a compatible active campaign, review the handoff, and confirm. Duplicate candidates can link to existing leads or remain separate with a reason. Linking never overwrites existing notes/history. Suppressed contacts are blocked server-side, including exports. Creator Partners and custom Lead Projects retain their own intake workflows.
+5. Export selected eligible contacts as CSV with field evidence, status, date and attribution. Apple/Google response data is never exported or placed in the CRM.
+
+### Source-use matrix (policy 2026-11-15-v1)
+
+| Source | Live display | Durable evidence | CSV / campaign handoff | Map |
+| --- | --- | --- | --- | --- |
+| OpenStreetMap | Yes, attributed | Reviewed fields, source URL, ODbL | Yes, with attribution and suppression checks | OpenStreetMap / Leaflet |
+| Independently researched official or authorized business source | Researcher's entered evidence | After explicit attestation | Published / manually confirmed fields only | No automatic geocoding |
+| Google Places | Configured live research only | No provider fields | No | Google Maps |
+| Apple Maps | Configured live research only | No provider fields | No | Apple MapKit JS |
+| Unknown source | Disabled | Disabled | Disabled | Disabled |
+
+Opening an official website is a separate research action; it is not authorization to copy provider content into the evidence form. Source URLs from Google/Apple are rejected as independent evidence. The business owner must review source/account permissions before enabling either commercial provider. See [Google Places policies](https://developers.google.com/maps/documentation/places/web-service/policies) and [Apple Maps terms](https://developer.apple.com/support/terms/).
+
+### Setup and usage controls
+
+Apply migrations with `npm run db:migrate` before starting. Migrations 0003–0004 add isolated Places tables; they do not reset campaign data. Configure Worker environment values using `.env.example` (local Cloudflare variables can be placed in a gitignored `.dev.vars`; never commit secrets). Commercial providers require credentials, an explicit enabled flag, free-allowance confirmation and an ISO reconciliation timestamp less than 24 hours old. They pause automatically when that timestamp expires. Google needs Places API (New) and Maps JavaScript API with separate restricted keys. Apple needs an authorized Maps key, team ID and key ID. Publish the required application terms/privacy disclosures before enabling Google in production.
+
+The owner must set each application's total cap below the **remaining allowance of every enabled operation** on the relevant account, accounting for use by other apps. The defaults are conservative pilot caps, not vendor free-tier entitlements. Counters are shared across this installation, reset on UTC day boundaries for Apple/OSM and UTC month boundaries for Google. Search/detail/map reservations are separately reported by operation for the current workspace. The shared aggregate cap stops new operations atomically, with 80%/95% warnings. Timeouts and uncertain dispatches remain counted. No paid fallback, automatic retry, pagination loop or background scheduler is enabled. A search reserves one operation; displaying a commercial map reserves another; each Google detail lookup reserves another. Apple token exchange and map SDK internals are not independently billed/reconciled by this ledger; use provider-side limits too. Local estimates cannot guarantee the provider's invoice. Reconciliation is owner-entered, not an API billing sync.
+
+Provider results exist only in component memory for 15 minutes, and disappear when leaving the module. Apple/Google run rows retain user-authored search settings and outcome metadata only. OSM run results expire after 30 days; audits and request detail expire after 90 days on authenticated access. Durable reviewed evidence remains until archived/updated under the workspace's retention process. Current pilot limits are 100 saved searches, 1000 contact records and the latest 50 runs/activity entries in the UI. Archiving does not delete records or free capacity. Run history persists; reload never re-dispatches a completed request. Unfinished requests become Interrupted after two minutes on refresh. Cancellation prevents later work but cannot recall a request already sent to a provider.
+
+### Verification and release boundaries
+
+`tests/places.test.mjs` exercises real isolated D1 migrations, quota races, idempotent execution, transient provider storage, evidence validation, campaign compatibility, duplicate linking, suppression and cross-owner access. `tests/worker-smoke.mjs` covers the compiled authenticated routes and existing CRM regressions. Provider response tests use controlled fixtures; live Apple/Google/Instagram integration and billing validation require the owner's accounts. Browser/mobile visual QA remains a release check where an authorized browser session is available. Automatic website extraction, registry-complete “all colleges,” billing API reconciliation, scheduled/background runs, Instagram hashtag discovery and Instagram messaging are not enabled by this pilot.
+
+### Instagram research
+
+**Keyword account search:** the Instagram tab now includes a keyword and optional location form (for example, `bridal makeup artist` + `Pune`). It uses Brave Web Search to find publicly indexed Instagram **profile URLs**, filters out posts/reels/explore pages and non-Instagram URLs, and deduplicates handles. Location is a search term, not a verified address. Results are web-index matches, not Instagram-native search results or confirmed professional accounts. Search snippets are labelled separately from Meta profile data; follower counts are never inferred from snippets.
+
+Set `BRAVE_SEARCH_API_KEY`, `INSTAGRAM_KEYWORD_ENABLED=true`, and an appropriate `INSTAGRAM_KEYWORD_DAILY_CAP` (default 20, maximum 100). This service is separate from Meta: a Meta access token cannot enable web keyword search. Review your Brave subscription and quota before enabling; the application cap does not guarantee zero charges. Without the search key, the form provides an explicit external Google web-search link and clearly labels in-app search as unconfigured. It does not scrape Instagram or search result pages.
+
+One search examines the first 20 web results and reports how many profile matches remain after exclusions. No automatic pagination or retries occur. Each unique request ID is claimed once, the daily installation-wide quota is reserved atomically, and errors/timeouts stay counted. Queries, snippets and matched profiles are not persisted; the audit contains request IDs and outcomes only. Results expire after 15 minutes or on leaving the tab. Choose **Use in username lookup** to populate the separate Meta form; performing that lookup is another explicit action and requires Meta credentials. The keyword endpoint is authenticated and rejects cross-origin writes. Tests exercise filtering, URL canonicalization, duplicate requests, quota races, redaction, and disabled-provider states. Reference: [Brave Web Search](https://api-dashboard.search.brave.com/app/documentation/web-search/get-started).
+
+Open **Places Discovery → Instagram**. This uses Meta's **Instagram API with Facebook Login — Business Discovery** for a known professional username. It returns available name, biography, website, follower count and media count. It does not search by geographic radius, read consumer/personal accounts, or promise email, phone and address discovery. No scraping, automatic messages, creator campaign imports, or token renewal is implemented.
+
+Configure these server variables, then restart the local server:
+
+| Variable | Required value |
+| --- | --- |
+| `INSTAGRAM_ACCOUNT_ID` | Your querying Instagram Business/Creator account's numeric ID, not the target username or Facebook Page ID |
+| `INSTAGRAM_ACCESS_TOKEN` | Facebook User token authorized for that professional account |
+| `INSTAGRAM_GRAPH_VERSION` | Supported version selected for your Meta app, for example `v27.0` in the current Meta documentation |
+| `INSTAGRAM_ENABLED` | `true` after app permissions and account eligibility are checked |
+| `INSTAGRAM_DAILY_CAP` | Conservative installation-wide daily lookup limit; default 40, maximum 100 |
+| `INSTAGRAM_APP_SECRET` | Optional app secret used to generate App Secret Proof; required when your app enforces that proof |
+
+Set up the Meta app with Instagram API with Facebook Login and link the querying professional Instagram account to a Facebook Page. The Business Discovery endpoint requires `instagram_basic`, `instagram_manage_insights`, and `pages_read_engagement`. A Page role granted through Business Manager can additionally require `ads_read` or `ads_management`. App access level, review and business-verification requirements depend on whether the app serves its own assigned accounts or external users; check the app dashboard. `pages_show_list` is relevant to account onboarding if you later add an OAuth connection flow. This pilot accepts a pre-authorized token and account ID; it has no interactive OAuth onboarding.
+
+Live profiles expire from UI memory after 15 minutes, clearing the profile, or leaving the Instagram tab. They are never stored in contact records, export files, browser storage or audit payloads. Audit rows contain only the request ID and outcome. Duplicate request IDs are rejected rather than re-fetching a lost result. Each attempt reserves an operation before dispatch; failures remain counted. There is no automatic retry. The API hides raw Meta error bodies to avoid exposing credentials. Independent business-contact evidence and creator campaign management remain separate workflows.
+
+Official references: [Meta Business Discovery](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/business_discovery), [Apple Maps key setup](https://developer.apple.com/help/account/capabilities/create-a-maps-identifier-and-private-key/), [Google API key restrictions](https://developers.google.com/maps/api-security-best-practices).
+
+### Apple and Google credential checklist
+
+**Apple:** create a Maps identifier in an Apple Developer account and associate a Maps-enabled private key. Configure `APPLE_MAPS_TEAM_ID`, `APPLE_MAPS_KEY_ID`, and `APPLE_MAPS_PRIVATE_KEY` (the downloaded `.p8` contents, with escaped newlines if necessary). The identifier is needed when configuring the key in Apple's portal; the implementation signs requests using the team ID, key ID and private key. MapKit tokens are origin-scoped by the server.
+
+**Google:** use a billing-enabled Google Cloud project with **Places API (New)** and **Maps JavaScript API** enabled. Configure `GOOGLE_PLACES_API_KEY` with the server key restricted to Places API (New), and `GOOGLE_MAPS_BROWSER_KEY` with a separate key restricted to Maps JavaScript API and allowed website referrers. Add the local app origin `http://127.0.0.1:5187/*` and the actual production domain as appropriate. Apply server IP restrictions where your hosting provides stable egress; do not apply browser referrer restrictions to the server key.
+
+Both providers remain disabled until `PLACES_<PROVIDER>_ENABLED=true`, `PLACES_<PROVIDER>_FREE_ALLOWANCE_CONFIRMED=true`, and `PLACES_<PROVIDER>_ALLOWANCE_CHECKED_AT` contains a current ISO timestamp. Set `PLACES_<PROVIDER>_CAP` below the account's verified remaining allowances. Credentials alone do not establish remaining free usage. Use local ignored environment configuration or the deployment's secret manager; never commit private keys, access tokens, or app secrets.

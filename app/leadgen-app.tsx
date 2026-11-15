@@ -23,6 +23,8 @@ import {
   ChartNoAxesCombined,
   Settings as SettingsIcon,
   RefreshCw,
+  Pause,
+  Play,
 } from "lucide-react";
 import {
   emptyWorkspace,
@@ -47,6 +49,7 @@ import { Leads } from "./leads";
 import { Outreach } from "./outreach";
 import { Analytics, Settings } from "./insights";
 import { Projects } from "./projects";
+const PlacesDiscovery = lazy(() => import("./places-discovery").then(module => ({ default: module.PlacesDiscovery })));
 import { ProjectOutreach } from "./project-outreach";
 import { ProjectOutcomes } from "./project-outcomes";
 // The map (Leaflet) loads only when a project's Map tab is opened.
@@ -70,6 +73,7 @@ const names = [
   "Dashboard",
   "Find My Market",
   "Campaigns",
+  "Places Discovery",
   "Lead Projects",
   "Leads",
   "Outreach",
@@ -81,6 +85,7 @@ const nav = [
   LayoutDashboard,
   ScanSearch,
   Megaphone,
+  ScanSearch,
   FolderSearch,
   Users,
   Send,
@@ -116,6 +121,7 @@ type Snapshot = { state: Workspace; revision: number };
 export default function LeadGenApp() {
   const [state, setState] = useState<Workspace>(emptyWorkspace);
   const [page, setPage] = useState("Dashboard");
+  const [motionPaused, setMotionPaused] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -762,7 +768,7 @@ export default function LeadGenApp() {
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <main className="workspace" id="main-content" tabIndex={-1}>
+      <main className="workspace" id="main-content" tabIndex={-1} data-motion={motionPaused ? "paused" : "active"}>
         <header className="topbar">
           <div className="flex items-center gap-3">
             <SidebarTrigger />
@@ -772,6 +778,7 @@ export default function LeadGenApp() {
             </span>
           </div>
           <div className="button-row">
+            <button className="motion-control" onClick={() => setMotionPaused(p => !p)} aria-pressed={motionPaused} aria-label={motionPaused ? "Resume decorative motion" : "Pause decorative motion"} title={motionPaused ? "Resume motion" : "Pause motion"}>{motionPaused ? <Play size={14} /> : <Pause size={14} />}<span>{motionPaused ? "Motion off" : "Motion on"}</span></button>
             <span className="saved-state" aria-live="polite">
               {busy
                 ? "Saving…"
@@ -838,6 +845,7 @@ export default function LeadGenApp() {
                   open={openCampaign}
                 />
               )}{" "}
+              {page === "Places Discovery" && <Suspense fallback={<p>Loading Places Discovery…</p>}><PlacesDiscovery campaigns={state.campaigns} onHandoff={async id => { await load(); setCampaignFilter(id); go("Leads"); }} /></Suspense>}
               {page === "Lead Projects" && (
                 <Projects
                   state={state}

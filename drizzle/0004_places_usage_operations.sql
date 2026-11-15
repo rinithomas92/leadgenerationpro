@@ -1,0 +1,1 @@
+ALTER TABLE `places_requests` ADD `operation` text DEFAULT 'search' NOT NULL;

@@ -19,6 +19,7 @@ import {
 } from "@/lib/leadgen";
 import { CampaignTable } from "./campaigns";
 import { Mark, Stats, formatDate } from "./ui";
+import { LuxeScene } from "./luxe-scene";
 
 type Props = {
   state: Workspace;
@@ -48,18 +49,21 @@ export function Dashboard({ state, start, startProject, go, open }: Props) {
 
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">WORKSPACE OVERVIEW</p>
-          <h1>Your growth, in focus.</h1>
+      <div className="page-heading atelier-hero">
+        <div className="atelier-hero-copy">
+          <p className="eyebrow">YOUR GROWTH WORKSPACE</p>
+          <h1>Find your people.<br /><em>Build what’s next.</em></h1>
           <p className="muted">
             Welcome back, {state.profile.name}. Here’s where your pipeline
             stands.
           </p>
+          <div className="button-row atelier-hero-actions">
+            <button className="primary" onClick={() => go("Places Discovery")}><ScanSearch size={17} /> Explore opportunities</button>
+            <button className="secondary" onClick={() => start()}><Plus size={17} /> New campaign</button>
+          </div>
+          <div className="atelier-hero-footnote"><span>01 · Discover</span><span>02 · Qualify</span><span>03 · Connect</span></div>
         </div>
-        <button className="primary" onClick={() => start()}>
-          <Plus size={17} /> New campaign
-        </button>
+        <LuxeScene />
       </div>
       <Stats leads={state.leads} />
       <div className="dashboard-grid operations-grid">

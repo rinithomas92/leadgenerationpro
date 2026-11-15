@@ -1,0 +1,125 @@
+"use client";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import type { Campaign } from "@/lib/leadgen";
+import { campaignEligible, evidenceFields, placeCategories, providerNames, type PlaceContact, type PlaceResult, type PlaceRun, type PlaceSearch, type PlacesSnapshot } from "@/lib/places";
+import PlacesMap from "./places-map";
+import { InstagramDiscovery } from "./instagram-discovery";
+import { LuxeScene } from "./luxe-scene";
+import "./places.css";
+
+export async function placesCall(body: unknown) {
+  const response = await fetch("/api/places", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await response.json() as { error?: string; run: PlaceRun; results: PlaceResult[]; areas: PlaceSearch["area"][]; duplicates?: { id: string; name: string; address: string }[]; linked?: boolean; website?: string; phone?: string; csv: string; count: number; excluded: number };
+  if (!response.ok) throw new Error(data.error || "The operation failed.");
+  return data;
+}
+const freshSearch = (): PlaceSearch => ({ id: crypto.randomUUID(), title: "New place research", category: "Colleges", keyword: "", provider: "osm", area: { label: "Pune", lat: 18.5204, lon: 73.8567 }, scope: "radius", radiusKm: 3, campaignId: "" });
+function newContact(result?: PlaceResult, runId = ""): PlaceContact {
+  return { id: crypto.randomUUID(), version: 0, fields: Object.fromEntries(evidenceFields.map(field => [field, { value: result?.[field] || "", sourceUrl: result?.source || "", source: result ? "osm" : "official", checkedAt: result?.checkedAt || new Date().toISOString(), status: result?.[field] ? "Published" : "Not found" }])) as PlaceContact["fields"], purpose: "General office", notes: "", attested: true, archived: false, origin: result ? "osm" : "independent", resultId: result?.id || "", runId };
+}
+function ContactEditor({ contact, close, saved }: { contact: PlaceContact; close: () => void; saved: () => Promise<void> }) {
+  const [draft, setDraft] = useState(contact);
+  const [attested, attest] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const update = (key: typeof evidenceFields[number], patch: Partial<PlaceContact["fields"]["name"]>) => setDraft(d => ({ ...d, fields: { ...d.fields, [key]: { ...d.fields[key], ...patch } } }));
+  return <section className="places-review" aria-label="Contact evidence review"><div className="places-heading"><div><small>CONTACT EVIDENCE</small><h2>{contact.version ? "Review saved contact" : "Qualify a new contact"}</h2></div><button onClick={close}>Close review</button></div>
+    <p>Save only independently sourced information or attributed OpenStreetMap data. Apple and Google results cannot be copied into this record. A published address is not consent to outreach.</p>
+    <form onSubmit={async e => { e.preventDefault(); setBusy(true); try { await placesCall({ action: "save-contact", contact: draft }); await saved(); close(); toast.success("Contact evidence saved"); } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); } }}>
+      {evidenceFields.map(key => <fieldset key={key}><legend>{key}</legend><div className="places-fields">
+        <label>Value<input value={draft.fields[key].value} onChange={e => update(key, { value: e.target.value })} maxLength={300} /></label>
+        <label>Evidence URL<input type="url" value={draft.fields[key].sourceUrl} onChange={e => update(key, { sourceUrl: e.target.value })} maxLength={300} /></label>
+        <label>Source<select value={draft.fields[key].source} onChange={e => update(key, { source: e.target.value as "official" | "owned" | "osm" })}><option value="official">Official website</option><option value="owned">Owned / authorized source</option>{draft.origin === "osm" && <option value="osm">OpenStreetMap</option>}</select></label>
+        <label>Status<select value={draft.fields[key].status} onChange={e => update(key, { status: e.target.value as PlaceContact["fields"]["name"]["status"] })}>{["Not found", "Published", "Manually confirmed", "Needs review", "Invalid"].map(s => <option key={s}>{s}</option>)}</select></label>
+        <label>Checked on<input type="date" required value={draft.fields[key].checkedAt.slice(0, 10)} onChange={e => e.target.value && update(key, { checkedAt: new Date(e.target.value).toISOString() })} /></label>
+      </div></fieldset>)}
+      <div className="places-fields"><label>Contact purpose<select value={draft.purpose} onChange={e => setDraft({ ...draft, purpose: e.target.value as PlaceContact["purpose"] })}>{["General office", "Admissions", "Placements", "Partnerships", "Other"].map(p => <option key={p}>{p}</option>)}</select></label><label>Notes<textarea value={draft.notes} maxLength={3000} onChange={e => setDraft({ ...draft, notes: e.target.value })} /></label></div>
+      <label className="places-check"><input type="checkbox" checked={draft.archived} onChange={e => setDraft({ ...draft, archived: e.target.checked })} />Archive this contact (excluded from exports and campaigns)</label>
+      <label className="places-check"><input type="checkbox" required checked={attested} onChange={e => attest(e.target.checked)} />I reviewed the evidence and have permission to retain this information.</label>
+      <button className="places-primary" disabled={busy || !attested}>{busy ? "Saving…" : "Save reviewed contact"}</button>
+    </form></section>;
+}
+export function PlacesDiscovery({ campaigns, onHandoff }: { campaigns: Campaign[]; onHandoff: (campaignId: string) => Promise<void> }) {
+  const [snapshot, setSnapshot] = useState<PlacesSnapshot>();
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState("Discover");
+  const [search, setSearch] = useState<PlaceSearch>(freshSearch);
+  const [areaQuery, setAreaQuery] = useState("Pune");
+  const [areas, setAreas] = useState<PlaceSearch["area"][]>([]);
+  const [run, setRun] = useState<PlaceRun>();
+  const [results, setResults] = useState<PlaceResult[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [editor, setEditor] = useState<PlaceContact>();
+  const [selected, setSelected] = useState<string[]>([]);
+  const [target, setTarget] = useState("");
+  const [duplicates, setDuplicates] = useState<{ contactId: string; campaignId: string; items: { id: string; name: string; address: string }[] }>();
+  const [reason, setReason] = useState("");
+  const [pendingHandoff, setPendingHandoff] = useState<PlaceContact>();
+  const [resultFilter, setResultFilter] = useState("");
+  const [mapReady, setMapReady] = useState(false);
+  const [detail, setDetail] = useState<{ name: string; website: string; phone: string }>();
+  async function refresh() {
+    const response = await fetch("/api/places", { cache: "no-store" }); const data = await response.json() as PlacesSnapshot & { error?: string };
+    if (!response.ok) throw new Error(data.error); setSnapshot(data); setError("");
+  }
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/places", { cache: "no-store", signal: controller.signal }).then(async response => {
+      const data = await response.json() as PlacesSnapshot & { error?: string };
+      if (!response.ok) throw new Error(data.error);
+      setSnapshot(data);
+    }).catch(e => { if (!controller.signal.aborted) setError(e.message); });
+    return () => controller.abort();
+  }, []);
+  useEffect(() => {
+    if (!run || run.search.provider === "osm") return;
+    const timer = setTimeout(() => { setResults([]); setDetail(undefined); toast.info("Live provider results expired. Run the search again to refresh."); }, 15 * 60_000);
+    return () => clearTimeout(timer);
+  }, [run]);
+  async function action(fn: () => Promise<void>) { setBusy(true); try { await fn(); } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); } }
+  async function discover() {
+    const id = crypto.randomUUID(); setResults([]); setDetail(undefined); setMapReady(false);
+    const started = await placesCall({ action: "start", id, search }); setRun(started.run);
+    const finished = await placesCall({ action: "execute", id }); setRun(finished.run); setResults(finished.results); await refresh();
+  }
+  async function handoff(contactId: string, campaignId: string, linkId = "", distinctReason = "") {
+    if (!campaignId) throw new Error("Select a destination campaign first.");
+    const data = await placesCall({ action: "handoff", id: contactId, campaignId, linkId, distinctReason });
+    if (data.duplicates) { setDuplicates({ contactId, campaignId, items: data.duplicates }); setReason(""); return; }
+    setDuplicates(undefined); setPendingHandoff(undefined); toast.success(data.linked ? "Linked to the existing lead" : "Contact added to campaign"); await onHandoff(campaignId);
+  }
+  const eligible = campaigns.filter(campaignEligible);
+  const provider = snapshot?.providers.find(p => p.id === search.provider);
+  const showResults = run?.search.provider !== "apple" || mapReady;
+  return <div className="places-module"><header className="places-heading"><div><small>DISCOVER · QUALIFY · CONNECT</small><h1>Places Discovery</h1><p>Find establishments. Review their contact evidence. Build a campaign with confidence.</p><button disabled={busy} onClick={() => action(refresh)}>Refresh workspace</button></div><LuxeScene compact /></header>
+    <div className="places-stats"><div><strong>{snapshot?.searches.length || 0}</strong>Saved searches</div><div><strong>{snapshot?.contacts.filter(c => !c.archived).length || 0}</strong>Research contacts</div><div><strong>{snapshot?.runs.length || 0}</strong>Recent runs</div><div><strong>Manual review</strong>Before campaign handoff</div></div>
+    <nav className="places-tabs" aria-label="Places sections">{["Discover", "Instagram", "Saved contacts", "Runs & searches", "Sources & usage"].map(t => <button key={t} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>{t}</button>)}</nav>
+    {error && <p role="alert" className="places-notice">{error}</p>}
+    {tab === "Instagram" && <InstagramDiscovery />}
+    {editor && <ContactEditor key={editor.id} contact={editor} close={() => setEditor(undefined)} saved={refresh} />}
+    {pendingHandoff && <section className="places-review"><h2>Confirm campaign handoff</h2><p><strong>{pendingHandoff.fields.name.value}</strong> → <strong>{eligible.find(c => c.id === target)?.name || "Choose a campaign below"}</strong></p><p>Duplicate and suppression checks run again on the server. Existing notes and outreach history will be preserved. Nothing is sent.</p>{evidenceFields.map(k => <p key={k}><strong>{k}: </strong>{["Published", "Manually confirmed"].includes(pendingHandoff.fields[k].status) ? pendingHandoff.fields[k].value || "Not found" : "Excluded: needs review"} · {pendingHandoff.fields[k].status}{pendingHandoff.fields[k].sourceUrl && <> · <a href={pendingHandoff.fields[k].sourceUrl} target="_blank" rel="noreferrer">Evidence</a></>}</p>)}<button className="places-primary" disabled={busy || !target} onClick={() => action(() => handoff(pendingHandoff.id, target))}>Confirm and open campaign leads</button><button onClick={() => setPendingHandoff(undefined)}>Cancel</button></section>}
+    {duplicates && <section className="places-review"><h2>Possible duplicate — choose how to proceed</h2>{duplicates.items.map(d => <div key={d.id} className="places-heading"><p>{d.name}<br />{d.address}</p><button disabled={busy} onClick={() => action(() => handoff(duplicates.contactId, duplicates.campaignId, d.id))}>Link existing lead</button></div>)}<label>Reason this is a different establishment<input value={reason} maxLength={300} onChange={e => setReason(e.target.value)} /></label><button disabled={busy || reason.trim().length < 10} onClick={() => action(() => handoff(duplicates.contactId, duplicates.campaignId, "", reason))}>Create a separate lead</button><button onClick={() => setDuplicates(undefined)}>Cancel</button></section>}
+    {tab === "Discover" && <><form className="places-panel" onSubmit={e => { e.preventDefault(); action(discover); }}><div className="places-fields">
+      <label>Research name<input required maxLength={300} value={search.title} onChange={e => setSearch({ ...search, title: e.target.value })} /></label>
+      <label>Category<select value={search.category} onChange={e => setSearch({ ...search, category: e.target.value as PlaceSearch["category"] })}>{Object.keys(placeCategories).map(c => <option key={c}>{c}</option>)}</select></label>
+      <label>Source<select value={search.provider} onChange={e => setSearch({ ...search, provider: e.target.value as PlaceSearch["provider"], scope: "radius" })}>{Object.entries(providerNames).map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select></label>
+      <label>Keyword (optional)<input value={search.keyword} maxLength={80} onChange={e => setSearch({ ...search, keyword: e.target.value })} placeholder="e.g. hospitality" /></label>
+    </div><div className="places-fields"><label>Find an area by exact name<input value={areaQuery} onChange={e => setAreaQuery(e.target.value)} placeholder="Pune or Baner" /></label><button type="button" disabled={busy || areaQuery.trim().length < 2} onClick={() => action(async () => { const data = await placesCall({ action: "resolve", query: areaQuery }); setAreas(data.areas); await refresh(); if (!data.areas.length) toast.info("No area found. Use a known coordinate below."); })}>Find area</button></div>
+    {areas.length > 0 && <label>Choose the correct area<select value="" onChange={e => { setSearch({ ...search, area: areas[Number(e.target.value)] }); setAreas([]); }}><option value="">Select an area…</option>{areas.map((a, i) => <option value={i} key={i}>{a.label}</option>)}</select></label>}
+    <p className="places-notice">Search centre: <strong>{search.area.label}</strong> ({search.area.lat.toFixed(4)}, {search.area.lon.toFixed(4)}). Changing the text above does not change the search until you select an area.</p>
+    <details><summary>Use exact coordinates</summary><div className="places-fields"><label>Area label<input value={search.area.label} onChange={e => setSearch({ ...search, area: { ...search.area, label: e.target.value } })} /></label>{(["lat", "lon"] as const).map(k => <label key={k}>{k === "lat" ? "Latitude" : "Longitude"}<input type="number" step="any" min={k === "lat" ? -90 : -180} max={k === "lat" ? 90 : 180} value={search.area[k]} onChange={e => setSearch({ ...search, scope: "radius", area: { ...search.area, areaId: undefined, [k]: Number(e.target.value) } })} /></label>)}</div></details>
+    <div className="places-fields"><label>Search scope<select value={search.scope} onChange={e => setSearch({ ...search, scope: e.target.value as "radius" | "area" })}><option value="radius">Around the selected centre</option>{search.provider === "osm" && search.area.areaId && <option value="area">Selected administrative boundary</option>}</select></label><label>Radius in km<input type="number" min={1} max={50} value={search.radiusKm} disabled={search.scope === "area" || search.provider === "apple"} onChange={e => setSearch({ ...search, radiusKm: Number(e.target.value) })} /></label><label>Campaign context (optional)<select value={search.campaignId} onChange={e => { setSearch({ ...search, campaignId: e.target.value }); setTarget(e.target.value); }}><option value="">Independent research</option>{eligible.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label></div>
+    <p>{search.provider === "apple" ? "Apple uses the selected centre as a relevance hint; it does not enforce this radius." : search.provider === "google" ? "Google uses the radius as a relevance bias, not a hard boundary." : "Directory searches use the selected radius or administrative boundary."}</p><p>Run envelope: one search request, plus one map initialization for Apple or Google when results are displayed. Optional detail lookups reserve additional operations.</p><p>{provider?.reason} {provider && `Allowance reserved: ${provider.used} / ${provider.cap} operations in ${provider.period}.`}</p><p className="places-muted">Coverage is incomplete. A map listing does not guarantee an email, phone number, or purchasing interest. Each run uses one source; there is no paid fallback.</p><div className="places-actions"><button className="places-primary" disabled={busy || !provider?.enabled}>{busy ? "Working…" : "Run discovery"}</button><button type="button" disabled={busy} onClick={() => action(async () => { await placesCall({ action: "save-search", search }); await refresh(); toast.success("Search saved"); })}>Save search</button><button type="button" onClick={() => { setSearch(freshSearch()); setAreaQuery("Pune"); }}>New search</button>{run && busy && <button type="button" onClick={async () => { try { await placesCall({ action: "cancel", id: run.id }); toast.info("Cancellation recorded"); } catch (e) { toast.error((e as Error).message); } }}>Cancel run</button>}</div></form>
+    {run && <section className="places-panel"><div className="places-heading"><div><h2>{run.search.title}</h2><p role="status">{run.status} · {run.count} results · {providerNames[run.search.provider]}</p></div><span>{new Date(run.createdAt).toLocaleString()}</span></div><p>{run.message}</p>{run.search.provider !== "osm" && <p className="places-notice">Live research only. Results are not saved, exported, or copied into leads. This view expires after 15 minutes.</p>}
+      <PlacesMap key={run.id} provider={run.search.provider} centre={run.search.area} results={results} ready={setMapReady} />
+      {showResults && <label>Filter returned listings<input value={resultFilter} onChange={e => setResultFilter(e.target.value)} placeholder="Name or address" /></label>}{showResults && <div className="places-results">{results.filter(r => `${r.name} ${r.address}`.toLowerCase().includes(resultFilter.toLowerCase())).map(r => <article key={r.id}><small>{r.category}</small>{r.provider === "google" && <p translate="no" style={{fontFamily:"sans-serif",fontWeight:400,fontSize:14,letterSpacing:"normal",whiteSpace:"nowrap",color:"#5e5e5e"}}>Google Maps</p>}{r.attributions?.map(a => <p key={a.name}>{a.url ? <a href={a.url} target="_blank" rel="noreferrer">{a.name}</a> : a.name}</p>)}<h3>{r.name}</h3><p>{r.address || "Address not published"}</p>{r.phone && <p>{r.phone}</p>}{r.email && <p>{r.email}</p>}{r.website && <a href={r.website} target="_blank" rel="noreferrer">Website ↗</a>}<div className="places-actions"><a href={r.source} target="_blank" rel="noreferrer">View source ↗</a><button onClick={() => setEditor(newContact(r.provider === "osm" ? r : undefined, r.provider === "osm" ? run.id : ""))}>{r.provider === "osm" ? "Review evidence" : "Add independent research"}</button>{r.provider === "google" && <button disabled={busy} onClick={() => action(async () => { const d = await placesCall({ action: "detail", runId: run.id, placeId: r.id }); setDetail({ name: r.name, website: d.website || "", phone: d.phone || "" }); await refresh(); })}>Live contact details</button>}</div></article>)}</div>}
+      {showResults && detail && <aside className="places-notice"><strong>{detail.name} · Google Maps live details</strong><p>{detail.phone || "Phone not published"}</p>{detail.website && <a href={detail.website} target="_blank" rel="noreferrer">Official website ↗</a>}<button onClick={() => setDetail(undefined)}>Close details</button></aside>}
+      {!results.length && <p>No live results in this view. Open an OpenStreetMap run from history or run a fresh search.</p>}{run.search.provider === "osm" && <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors · ODbL</a>}
+    </section>}</>}
+    {tab === "Saved contacts" && <section className="places-panel"><div className="places-heading"><div><h2>Evidence you can act on</h2><p>Only published or manually confirmed fields reach campaigns and exports.</p></div><button className="places-primary" onClick={() => setEditor(newContact())}>Add independent contact</button></div><div className="places-fields"><label>Destination campaign<select value={target} onChange={e => setTarget(e.target.value)}><option value="">Choose campaign…</option>{eligible.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label><button disabled={busy || !selected.length} onClick={() => action(async () => { const d = await placesCall({ action: "export", ids: selected }); const url = URL.createObjectURL(new Blob([d.csv], { type: "text/csv;charset=utf-8" })); const a = document.createElement("a"); a.href = url; a.download = "places-contact-evidence.csv"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); toast.success(`${d.count} exported; ${d.excluded} archived or suppressed excluded`); await refresh(); })}>Export selected ({selected.length})</button></div>
+      {!snapshot?.contacts.length && <p>No contacts yet. Review a directory result or add independently sourced contact information.</p>}
+      <div className="places-results">{snapshot?.contacts.map(c => <article key={c.id}><label className="places-check"><input type="checkbox" checked={selected.includes(c.id)} onChange={e => setSelected(s => e.target.checked ? [...s, c.id] : s.filter(id => id !== c.id))} />Select for export</label><h3>{c.fields.name.value}</h3>{snapshot?.blocked.includes(c.id) && <p className="places-notice">Do not contact — blocked from export and campaign handoff.</p>}<small>{c.archived ? "Archived" : c.purpose} · {c.origin === "osm" ? "OpenStreetMap + reviewed evidence" : "Independent evidence"}</small><p>{c.fields.address.value || "Address missing"}</p><p>{c.fields.email.value || "Email missing"}<br />{c.fields.phone.value || "Phone missing"}</p><div className="places-actions"><button onClick={() => setEditor(c)}>Review / edit</button><button disabled={busy || c.archived || !target || snapshot?.blocked.includes(c.id)} onClick={() => setPendingHandoff(c)}>Add to campaign</button></div></article>)}</div></section>}
+    {tab === "Runs & searches" && <section className="places-panel"><h2>Saved searches</h2>{snapshot?.searches.map(s => <div className="places-history" key={s.id}><div><strong>{s.title}</strong><p>{s.category} · {s.area.label} · {providerNames[s.provider]}</p></div><button onClick={() => { setSearch(s); setAreaQuery(s.area.label); setTarget(s.campaignId); setTab("Discover"); }}>Load search</button><button disabled={busy} onClick={() => action(async () => { await placesCall({ action: "delete-search", id: s.id }); await refresh(); })}>Delete definition</button></div>)}<h2>Recent runs</h2><p>Directory results are retained for 30 days. Live Apple and Google results must be searched again after leaving the view.</p>{snapshot?.runs.map(r => <div className="places-history" key={r.id}><div><strong>{r.search.title} · {r.status}</strong><p>{new Date(r.createdAt).toLocaleString()} · {r.count} found · {r.message}</p></div><button onClick={() => { setRun(r); setResults(r.results); setDetail(undefined); setTab("Discover"); }}>View run</button>{["Ready", "Running"].includes(r.status) && <button onClick={() => action(async () => { await placesCall({ action: "cancel", id: r.id }); await refresh(); })}>Cancel</button>}</div>)}</section>}
+    {tab === "Sources & usage" && <section className="places-panel"><h2>Sources and operational limits</h2><p>Paid mode is disabled. These conservative application counters reserve operations before dispatch, including failures. They are not a provider invoice or a guarantee of free service. Limits are shared across this installation.</p><div className="places-results">{snapshot?.providers.map(p => <article key={p.id}><h3>{p.name}</h3><strong>{p.enabled ? "Available" : "Setup required"}</strong><p>{p.reason}</p><progress value={p.used} max={p.cap} aria-label={`${p.name} usage`} /><p>{p.used} / {p.cap} operations · {p.period} (UTC)</p>{p.used >= p.cap * .8 && <p role="status">{p.used >= p.cap * .95 ? "95% limit warning. New requests stop at the cap." : "80% limit warning. Review usage before continuing."}</p>}{p.operations?.map(o => <p key={o.operation}>{o.operation}: {o.count} reserved in this workspace</p>)}<p>Last reconciliation: {p.checkedAt ? new Date(p.checkedAt).toLocaleString() : "Not reconciled"}</p><p>Paid spend budget: 0. Actual charges require provider billing reconciliation.</p></article>)}</div><p>Apple and Google require server credentials, restricted map credentials, and an administrator’s confirmation of the remaining free allowance. Map loads and detail lookups also reserve operations. There is no automatic source switching or retry.</p><h2>Recent activity</h2><p>Latest 50 events; retained for 90 days. Provider response content is never written to the audit log.</p>{snapshot?.audit.map((a, i) => <div className="places-history" key={i}><strong>{a.action.replaceAll("_", " ")}</strong><span>{a.subject}</span><time>{new Date(a.at).toLocaleString()}</time></div>)}</section>}
+  </div>;
+}

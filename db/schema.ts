@@ -8,6 +8,14 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+export const placesSearches = sqliteTable("places_searches", { owner: text("owner").notNull(), id: text("id").notNull(), data: text("data").notNull() }, t => [primaryKey({ columns: [t.owner, t.id] })]);
+export const placesRuns = sqliteTable("places_runs", { owner: text("owner").notNull(), id: text("id").notNull(), search: text("search").notNull(), status: text("status").notNull(), count: integer("count").notNull().default(0), message: text("message").notNull().default(""), results: text("results").notNull().default("[]"), createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull() }, t => [primaryKey({ columns: [t.owner, t.id] })]);
+export const placesContacts = sqliteTable("places_contacts", { owner: text("owner").notNull(), id: text("id").notNull(), version: integer("version").notNull().default(1), data: text("data").notNull() }, t => [primaryKey({ columns: [t.owner, t.id] })]);
+export const placesLinks = sqliteTable("places_links", { owner: text("owner").notNull(), contactId: text("contact_id").notNull(), campaignId: text("campaign_id").notNull(), leadId: text("lead_id").notNull() }, t => [primaryKey({ columns: [t.owner, t.contactId, t.campaignId] })]);
+export const placesAudit = sqliteTable("places_audit", { owner: text("owner").notNull(), id: text("id").notNull(), action: text("action").notNull(), subject: text("subject").notNull(), at: text("at").notNull() }, t => [primaryKey({ columns: [t.owner, t.id] })]);
+export const placesQuota = sqliteTable("places_quota", { meter: text("meter").notNull(), period: text("period").notNull(), used: integer("used").notNull().default(0) }, t => [primaryKey({ columns: [t.meter, t.period] })]);
+export const placesRequests = sqliteTable("places_requests", { owner: text("owner").notNull(), id: text("id").notNull(), meter: text("meter").notNull(), period: text("period").notNull(), at: text("at").notNull(), operation: text("operation").notNull().default("search") }, t => [primaryKey({ columns: [t.owner, t.id] })]);
+export const placesCache = sqliteTable("places_cache", { key: text("key").primaryKey().notNull(), data: text("data").notNull(), expires: integer("expires").notNull() });
 export const workspaces = sqliteTable("workspaces", {
   owner: text("owner").primaryKey(),
   // Workspace JSON without leads (profile, campaigns, drafts, templates).
