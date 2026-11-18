@@ -7,13 +7,35 @@ import { reserve, providerConfig, searchPlaces } from "../lib/places-providers.t
 import { startRun, executeRun, getRun, cancelRun, saveContact, getContact, handoff, eligibleContacts } from "../lib/places-store.ts";
 import { loadWorkspace, saveWorkspace } from "../lib/workspace-store.ts";
 import { newCampaign } from "../lib/leadgen.ts";
-import { fetchInstagramProfile, instagramConfig, instagramLookup, lookupInstagram, instagramStatus } from "../lib/instagram.ts";
+import { fetchInstagramProfile, instagramConfig, instagramLookup, lookupInstagram, instagramStatus, instagramCooldown } from "../lib/instagram.ts";
 import { fetchInstagramKeywords, instagramKeywordSchema, instagramProfileURL, keywordConfig, keywordStatus, searchInstagramKeywords } from "../lib/instagram-keyword.ts";
 const search = (provider="osm") => searchSchema.parse({ id: crypto.randomUUID(), title: "Pune colleges", category: "Colleges", provider, area: {label:"Pune",lat:18.52,lon:73.85} });
 const contact = () => contactSchema.parse({ id:crypto.randomUUID(), origin:"independent", attested:true, fields:Object.fromEntries(evidenceFields.map(k=>[k,{value:({name:"Example College",address:"1 College Road, Pune",email:"office@example.edu",website:"https://example.edu"})[k]||"",sourceUrl:"https://example.edu/contact",source:"official",status:"Published",checkedAt:new Date().toISOString()}])) });
 const instagramEnv = { INSTAGRAM_ENABLED:"true", INSTAGRAM_ACCOUNT_ID:"123456", INSTAGRAM_ACCESS_TOKEN:"secret-test-token", INSTAGRAM_GRAPH_VERSION:"v27.0", INSTAGRAM_DAILY_CAP:"2" };
 const keywordEnv = { BRAVE_SEARCH_API_KEY:"test-search-secret", INSTAGRAM_KEYWORD_ENABLED:"true", INSTAGRAM_KEYWORD_DAILY_CAP:"2" };
 const keywordInput = () => instagramKeywordSchema.parse({id:crypto.randomUUID(),keywords:"makeup artist",location:"Pune"});
+
+test("Instagram cooldown respects usage headers, Meta errors and retry hints", async () => {
+ assert.equal(await instagramCooldown(Response.json({}, {headers:{"x-app-usage":JSON.stringify({call_count:79,total_time:1})}})),0);
+ assert.equal(await instagramCooldown(Response.json({}, {headers:{"x-app-usage":JSON.stringify({total_cputime:80})}})),3600);
+ assert.equal(await instagramCooldown(Response.json({error:{code:4}}, {status:400,headers:{"retry-after":"7200"}})),7200);
+ assert.equal(await instagramCooldown(Response.json({}, {headers:{"x-business-use-case-usage":JSON.stringify({account:[{estimated_time_to_regain_access:120}]})}})),7200);
+ assert.equal(await instagramCooldown(Response.json({error:{code:190}}, {status:400})),0);
+});
+test("Instagram hourly cap and shared cooldown stop additional provider calls", () => database(async db => {
+ const env={...instagramEnv,INSTAGRAM_DAILY_CAP:"200"};let calls=0;
+ const high=async()=>{calls++;return Response.json({business_discovery:{username:"example",followers_count:10}}, {headers:{"x-app-usage":JSON.stringify({call_count:80})}});};
+ await lookupInstagram(db,"a",{id:crypto.randomUUID(),username:"example"},env,high);
+ await assert.rejects(lookupInstagram(db,"b",{id:crypto.randomUUID(),username:"example"},env,high),e=>e.status===429);
+ assert.equal(calls,1);assert.equal((await instagramStatus(db,env)).remaining,0);
+ await db.prepare("UPDATE places_quota SET used=0 WHERE meter='instagram-pause'").run();
+ const hour=new Date().toISOString().slice(0,13);
+ await db.prepare("UPDATE places_quota SET used=59 WHERE meter='instagram-hour' AND period=?").bind(hour).run();
+ const f=async()=>{calls++;return Response.json({business_discovery:{username:"example",followers_count:10}});};
+ const results=await Promise.allSettled(Array.from({length:5},()=>lookupInstagram(db,"a",{id:crypto.randomUUID(),username:"example"},env,f)));
+ assert.equal(results.filter(r=>r.status==="fulfilled").length,1);
+ assert.equal(calls,2);assert.equal((await instagramStatus(db,env)).hourlyUsed,60);
+}));
 test("Instagram keyword results include canonical profiles only and never fabricate account metrics",async()=>{
  assert.equal(keywordConfig({}).enabled,false);
  assert.equal(instagramKeywordSchema.safeParse({...keywordInput(),keywords:"site:evil.com"}).success,false);

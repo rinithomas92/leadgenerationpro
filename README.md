@@ -465,7 +465,7 @@ Configure these server variables, then restart the local server:
 | `INSTAGRAM_ACCESS_TOKEN` | Facebook User token authorized for that professional account |
 | `INSTAGRAM_GRAPH_VERSION` | Supported version selected for your Meta app, for example `v27.0` in the current Meta documentation |
 | `INSTAGRAM_ENABLED` | `true` after app permissions and account eligibility are checked |
-| `INSTAGRAM_DAILY_CAP` | Conservative installation-wide daily lookup limit; default 40, maximum 100 |
+| `INSTAGRAM_DAILY_CAP` | Conservative installation-wide daily lookup limit; default 200, maximum 200; additionally limited to 60 reservations per fixed UTC hour |
 | `INSTAGRAM_APP_SECRET` | Optional app secret used to generate App Secret Proof; required when your app enforces that proof |
 
 Set up the Meta app with Instagram API with Facebook Login and link the querying professional Instagram account to a Facebook Page. The Business Discovery endpoint requires `instagram_basic`, `instagram_manage_insights`, and `pages_read_engagement`. A Page role granted through Business Manager can additionally require `ads_read` or `ads_management`. App access level, review and business-verification requirements depend on whether the app serves its own assigned accounts or external users; check the app dashboard. `pages_show_list` is relevant to account onboarding if you later add an OAuth connection flow. This pilot accepts a pre-authorized token and account ID; it has no interactive OAuth onboarding.
@@ -493,3 +493,5 @@ Set `LEADGEN_HOSTING=vercel`, `LEADGEN_DATABASE_URL`, `LEADGEN_LOGIN_PASSWORD`, 
 This deployment uses a single-owner workspace password, not Supabase user registration. Signed HttpOnly cookies expire after seven days; password attempts are rate-limited in PostgreSQL. Rotate the session secret to invalidate all sessions. The local hosting-specific identity headers are never accepted in Vercel mode.
 
 Use `scripts/check-vercel.mjs <url>` with the local environment loaded to check anonymous denial, sign-in, migrated workspace, projects, Places, and Instagram configuration without printing credentials. For database compatibility tests, run the Places tests with `LEADGEN_TEST_POSTGRES=true` and `LEADGEN_DATABASE_URL` configured; tests use isolated temporary schemas and leave production tables intact.
+
+Instagram pacing: all users share a 60-per-UTC-hour counter and the configured daily cap. The server persists a shared pause when Meta usage headers reach 80%, HTTP 429 occurs, or a recognized Meta throttling error is returned. The pause lasts at least one hour and honors longer Retry-After or estimated_time_to_regain_access hints. These are conservative application limits, not a guaranteed Meta allocation. Failed reservations may consume allowance; no automatic retry is sent. Existing usage counts are retained when limits change.

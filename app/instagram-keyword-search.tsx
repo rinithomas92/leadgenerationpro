@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { InstagramKeywordResults } from "@/lib/instagram-keyword";
 import { followerRange, withinFollowerRange } from "@/lib/follower-range";
-type Status = { enabled: boolean; reason: string; cap: number; used: number; period: string };
+type Status = { enabled: boolean; reason: string; cap: number; used: number; period: string; remaining?: number; paused?: boolean; hourlyCap?: number; hourlyUsed?: number };
 export function InstagramKeywordSearch({ selectUsername }: { selectUsername: (username: string) => void }) {
   const [minimumInput, setMinimumInput] = useState("");
   const [limitInput, setLimitInput] = useState("500");
@@ -40,8 +40,8 @@ export function InstagramKeywordSearch({ selectUsername }: { selectUsername: (us
         const response = await fetch("/api/places/instagram", { cache: "no-store", signal: controller.signal });
         const meta = await response.json() as Status;
         if (!response.ok || !meta.enabled) throw new Error("Connect Instagram lookup before filtering by followers.");
-        remaining = Math.max(0, meta.cap - meta.used);
-        if (!remaining) throw new Error("Instagram daily lookup cap reached. Try tomorrow or leave both follower limits blank.");
+        remaining = meta.remaining ?? Math.max(0, meta.cap - meta.used);
+        if (!remaining) throw new Error(meta.reason || "Instagram lookup limit reached. Try later or leave both follower limits blank.");
       }
       setProgress("Finding accounts…");
       const r = await fetch("/api/places/instagram/search", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ id: crypto.randomUUID(), keywords, location }) });
