@@ -5,5 +5,7 @@ export function database() {
 }
 export function sameOrigin(req: Request) {
   const origin = req.headers.get("origin");
-  return !origin || origin === new URL(req.url).origin;
+  if (!origin) return true;
+  try { return new URL(origin).host === (req.headers.get("host") || new URL(req.url).host); }
+  catch { return false; }
 }

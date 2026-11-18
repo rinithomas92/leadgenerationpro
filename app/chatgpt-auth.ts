@@ -1,5 +1,6 @@
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { ownerCookie, ownerId, validOwnerSession } from "@/lib/owner-auth";
 
 export type ChatGPTUser = {
   userId: string;
@@ -19,6 +20,10 @@ const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
+  if (process.env.LEADGEN_HOSTING === "vercel") {
+    const value = (await cookies()).get(ownerCookie)?.value;
+    return value && validOwnerSession(value) ? { userId: ownerId, displayName: "Rini", email: "", fullName: "Rini Thomas" } : null;
+  }
   const requestHeaders = await headers();
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
@@ -50,7 +55,7 @@ export async function requireChatGPTUser(
 
 export function chatGPTSignInPath(returnTo: string): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
-  return `${SIGN_IN_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
+  return `${process.env.LEADGEN_HOSTING === "vercel" ? "/login" : SIGN_IN_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 
 export function chatGPTSignOutPath(returnTo = "/"): string {

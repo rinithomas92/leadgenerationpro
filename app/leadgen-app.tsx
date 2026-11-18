@@ -170,8 +170,10 @@ export default function LeadGenApp() {
   const load = useCallback(async () => {
     if (lock.current) return;
     if (!initialized.current) setLoading(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
     try {
-      const response = await fetch("/api/workspace");
+      const response = await fetch("/api/workspace", { cache: "no-store", signal: controller.signal });
       const data = (await response.json()) as Snapshot & { error: string };
       if (!response.ok) throw new Error(data.error);
       const snap = data as Snapshot;
@@ -183,9 +185,10 @@ export default function LeadGenApp() {
       setError("");
     } catch (e) {
       setError(
-        e instanceof Error ? e.message : "Could not load your workspace.",
+        controller.signal.aborted ? "Loading took too long. Your saved data is safe. Please reload to try again." : e instanceof Error ? e.message : "Could not load your workspace.",
       );
     } finally {
+      clearTimeout(timeout);
       setLoading(false);
     }
   }, [loadExtras]);
@@ -808,6 +811,7 @@ export default function LeadGenApp() {
               className="loading-surface"
             >
               <h1>Your workspace is opening…</h1>
+              <p className="muted">If this screen stays here, <a href="/">reload the app</a>.</p>
               <Skeleton className="h-44 w-full" />
               <div className="stats">
                 {[1, 2, 3, 4].map((i) => (

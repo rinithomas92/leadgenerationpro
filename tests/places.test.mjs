@@ -65,6 +65,7 @@ test("Instagram attempts are bounded, replay-safe, and never store profile conte
  assert.equal((await db.prepare("SELECT count(*) AS n FROM places_contacts").first()).n,0);
 }));
 async function database(fn) {
+ if(process.env.LEADGEN_TEST_POSTGRES === "true") return (await import("./postgres-database.mjs")).postgresTestDatabase(fn);
  const mf = new Miniflare({modules:true,script:"export default {fetch(){return new Response('ok')}}",d1Databases:["DB"],compatibilityDate:"2026-05-15"});
  try {const db=await mf.getD1Database("DB"); for(const file of readdirSync("drizzle").filter(f=>f.endsWith(".sql")).sort()) for(const sql of readFileSync(`drizzle/${file}`,"utf8").split("--> statement-breakpoint")) if(sql.trim())await db.exec(sql.replace(/\r?\n/g," ")); await fn(db);} finally {await mf.dispose();}
 }

@@ -481,3 +481,15 @@ Official references: [Meta Business Discovery](https://developers.facebook.com/d
 **Google:** use a billing-enabled Google Cloud project with **Places API (New)** and **Maps JavaScript API** enabled. Configure `GOOGLE_PLACES_API_KEY` with the server key restricted to Places API (New), and `GOOGLE_MAPS_BROWSER_KEY` with a separate key restricted to Maps JavaScript API and allowed website referrers. Add the local app origin `http://127.0.0.1:5187/*` and the actual production domain as appropriate. Apply server IP restrictions where your hosting provides stable egress; do not apply browser referrer restrictions to the server key.
 
 Both providers remain disabled until `PLACES_<PROVIDER>_ENABLED=true`, `PLACES_<PROVIDER>_FREE_ALLOWANCE_CONFIRMED=true`, and `PLACES_<PROVIDER>_ALLOWANCE_CHECKED_AT` contains a current ISO timestamp. Set `PLACES_<PROVIDER>_CAP` below the account's verified remaining allowances. Credentials alone do not establish remaining free usage. Use local ignored environment configuration or the deployment's secret manager; never commit private keys, access tokens, or app secrets.
+
+### Vercel deployment
+
+The Next.js build in `vercel.json` runs the complete application on Vercel. The local Vinext/D1 workflow remains available with `npm run dev`.
+
+Production uses a dedicated Supabase PostgreSQL project and the private `leadgen` schema. `lib/postgres-d1.ts` preserves prepared parameters and atomic batches for the existing stores; PostgreSQL compatibility functions and generated columns are defined in `deployment/postgres-schema.sql`. Apply that schema only to a new, empty target. `scripts/migrate-workspace-postgres.mjs` copies local D1 rows without deleting the source. It maps the local preview owner to the production owner.
+
+Set `LEADGEN_HOSTING=vercel`, `LEADGEN_DATABASE_URL`, `LEADGEN_LOGIN_PASSWORD`, and a random 32-byte `LEADGEN_SESSION_SECRET` as sensitive production variables. The database connection verifies TLS with `certs/supabase-ca.crt`. Provider credentials are server-only. `.vercelignore` excludes local data and credentials from uploads.
+
+This deployment uses a single-owner workspace password, not Supabase user registration. Signed HttpOnly cookies expire after seven days; password attempts are rate-limited in PostgreSQL. Rotate the session secret to invalidate all sessions. The local hosting-specific identity headers are never accepted in Vercel mode.
+
+Use `scripts/check-vercel.mjs <url>` with the local environment loaded to check anonymous denial, sign-in, migrated workspace, projects, Places, and Instagram configuration without printing credentials. For database compatibility tests, run the Places tests with `LEADGEN_TEST_POSTGRES=true` and `LEADGEN_DATABASE_URL` configured; tests use isolated temporary schemas and leave production tables intact.
